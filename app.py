@@ -317,7 +317,8 @@ TO_RE = re.compile(
     r"(?:у напрямку|в напрямку|\bдо\b|towards?)\s+([\w\-'іїєА-ЯіїєҐґЄєІіЇї]{3,}(?:\s+[\w\-'іїєА-ЯіїєҐґЄєІіЇї]{3,})?)",
     re.I,
 )
-COUNT_RE = re.compile(r"(\d+)\s*(?:шахед|бпла|ракет|дрон|калібр|кинджал)", re.I)
+COUNT_RE   = re.compile(r"(\d+)\s*(?:шахед|бпла|ракет|дрон|калібр|кинджал)", re.I)
+GROUP_RE   = re.compile(r"груп[аиі]|кількох|декількох|group", re.I)
 
 CHANNEL_NAMES = {
     "kpszsu":    "КПСЗСУ",
@@ -350,14 +351,18 @@ def parse_message(text: str, channel: str, msg_id: int = 0) -> dict | None:
             break
 
     # Count
+    import random
     m = COUNT_RE.search(text)
-    count = int(m.group(1)) if m else 1
+    if m:
+        count = int(m.group(1))
+    elif GROUP_RE.search(text):
+        count = random.randint(4, 10)
+    else:
+        count = 1
 
     # Directions
     frm = (FROM_RE.search(text) or type("", (), {"group": lambda s, i: None})()).group(1)
     to  = (TO_RE.search(text)   or type("", (), {"group": lambda s, i: None})()).group(1)
-
-    import random
     primary = locs[0] if locs else None
 
     return {
@@ -743,6 +748,9 @@ def main() -> None:
         with open(CONFIG) as f:
             cfg = json.load(f)
 
+    # ── Download Leaflet libs BEFORE server starts so page always has them ───
+    _ensure_web_libs()
+
     # ── Server ────────────────────────────────────────────────────────────────
     import uvicorn
     t = threading.Thread(
@@ -757,8 +765,7 @@ def main() -> None:
     url = f"http://127.0.0.1:{args.port}"
     log.info("Server ready at %s", url)
 
-    # ── Background: download Leaflet libs + start Telegram ────────────────────
-    threading.Thread(target=_ensure_web_libs, daemon=True, name="libs").start()
+    # ── Start Telegram in background ──────────────────────────────────────────
     threading.Thread(target=_run_telegram, args=(cfg,), daemon=True, name="telegram").start()
 
     # ── Open UI ────────────────────────────────────────────────────────────────

@@ -98,7 +98,7 @@ function makeIcon(type, status, bearingDeg) {
   const ring   = RING_COLORS[status] || RING_COLORS.unknown;
   const isActive = status === 'moving' || status === 'launch' || status === 'alert';
   const pulse  = isActive ? 'style="animation:iconPulse 1.8s infinite"' : '';
-  const size   = type === 'kinzhal' ? 32 : (def.cat === 'missile' ? 28 : 26);
+  const size   = type === 'kinzhal' ? 40 : (def.cat === 'missile' ? 34 : 36);
 
   const svg = `
     <svg width="${size}" height="${size}" viewBox="0 0 16 16"

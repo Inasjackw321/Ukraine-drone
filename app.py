@@ -439,30 +439,31 @@ async def _telegram_loop(cfg: dict) -> None:
             log.warning("  can't resolve @%s — %s", slug, e)
 
     last_ids: dict[str, int] = {s: 0 for s in entities.values()}
-    first_pass = True
 
     while True:
+        cutoff = datetime.now(timezone.utc) - timedelta(seconds=600)
+
         for eid, slug in entities.items():
             try:
-                msgs = await client.get_messages(
-                    eid,
-                    limit=30 if first_pass else 50,
-                    min_id=0 if first_pass else last_ids[slug],
-                )
+                msgs = await client.get_messages(eid, limit=50)
             except Exception as e:
                 log.warning("fetch error %s: %s", slug, e)
                 continue
 
             for msg in reversed(msgs or []):
-                if msg.id <= last_ids[slug]:
+                if not msg.date:
                     continue
-                last_ids[slug] = msg.id
+                # Telethon may return naive or aware datetimes — normalise to UTC
+                msg_date = msg.date if msg.date.tzinfo else msg.date.replace(tzinfo=timezone.utc)
+                if msg_date < cutoff:
+                    continue  # older than 10 minutes, skip
+                if msg.id <= last_ids[slug]:
+                    continue  # already processed
+                last_ids[slug] = max(last_ids[slug], msg.id)
                 evt = parse_message(msg.message or "", slug, msg.id)
                 if evt:
                     log.info("[%s] %-10s  %s", slug, evt["type"], evt.get("location", "?"))
                     push_event(evt)
-
-        first_pass = False
 
         nxt = (datetime.now(timezone.utc) + timedelta(seconds=POLL_SECS)).isoformat()
         if _loop and _loop.is_running():

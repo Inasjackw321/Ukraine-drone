@@ -41,11 +41,11 @@ const map = L.map('map', {
 L.control.zoom({ position: 'topright' }).addTo(map);
 
 // Tiles are proxied through localhost so they load inside pywebview without
-// any CORS/CSP issues. The server fetches from CartoDB and caches them.
+// any CORS/CSP issues. The server fetches from CartoDB/OSM and caches them.
 L.tileLayer('/tiles/{z}/{x}/{y}.png', {
   maxZoom: 18,
-  // Fallback to CartoDB directly if the proxy fails (browser mode)
-  errorTileUrl: 'https://a.basemaps.cartocdn.com/dark_matter_nolabels/0/0/0.png',
+  crossOrigin: true,
+  keepBuffer: 4,
 }).addTo(map);
 
 // Ukraine border outline

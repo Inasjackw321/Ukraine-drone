@@ -298,34 +298,49 @@ def _get_stats():
 
 
 # ── Tile proxy — serves map tiles through localhost so pywebview can load them
-_tile_cache: dict[str, bytes] = {}   # simple in-memory cache (clears on restart)
+_tile_cache: dict[str, bytes] = {}
 
-async def _fetch_tile(url: str) -> bytes | None:
-    if url in _tile_cache:
-        return _tile_cache[url]
+_TILE_HEADERS = {
+    "User-Agent": _BROWSER_UA,
+    "Accept": "image/png,image/*,*/*",
+    "Referer": "https://www.openstreetmap.org/",
+}
+
+# Candidate tile URLs tried in order until one succeeds
+def _tile_urls(z: int, x: int, y: int) -> list[str]:
+    sub = "abc"[int(x + y) % 3]
+    return [
+        f"https://{sub}.basemaps.cartocdn.com/dark_matter_nolabels/{z}/{x}/{y}.png",
+        f"https://cartodb-basemaps-{sub}.global.ssl.fastly.net/dark_matter_nolabels/{z}/{x}/{y}.png",
+        f"https://tile.openstreetmap.org/{z}/{x}/{y}.png",
+    ]
+
+
+def _fetch_tile_sync(z: int, x: int, y: int) -> bytes | None:
     import urllib.request
-    def _get():
-        req = urllib.request.Request(url, headers={"User-Agent": _BROWSER_UA})
-        with urllib.request.urlopen(req, timeout=8) as r:
-            return r.read()
-    try:
-        data = await asyncio.to_thread(_get)
-        if len(_tile_cache) < 2000:   # keep cache bounded
-            _tile_cache[url] = data
-        return data
-    except Exception:
-        return None
+    cache_key = f"{z}/{x}/{y}"
+    if cache_key in _tile_cache:
+        return _tile_cache[cache_key]
+    for url in _tile_urls(z, x, y):
+        try:
+            req = urllib.request.Request(url, headers=_TILE_HEADERS)
+            with urllib.request.urlopen(req, timeout=10) as r:
+                data = r.read()
+            if len(_tile_cache) < 4000:
+                _tile_cache[cache_key] = data
+            return data
+        except Exception:
+            continue
+    return None
 
 
 @web_app.get("/tiles/{z}/{x}/{y}.png")
 async def _tile_dark(z: int, x: int, y: int):
-    data = await _fetch_tile(
-        f"https://a.basemaps.cartocdn.com/dark_matter_nolabels/{z}/{x}/{y}.png"
-    )
+    data = await asyncio.to_thread(_fetch_tile_sync, z, x, y)
     if data is None:
         return Response(status_code=503)
     return Response(content=data, media_type="image/png",
-                    headers={"Cache-Control": "max-age=86400"})
+                    headers={"Cache-Control": "max-age=86400", "Access-Control-Allow-Origin": "*"})
 
 
 @web_app.websocket("/ws")

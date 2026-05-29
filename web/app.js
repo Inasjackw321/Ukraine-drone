@@ -7,6 +7,7 @@ const THREATS = {
   shahed:    { label: 'Shahed',    color: '#f97316', glow: '#f97316', speed: 150,  cat: 'drone'   },
   geran:     { label: 'Geranium',  color: '#f97316', glow: '#f97316', speed: 150,  cat: 'drone'   },
   drone:     { label: 'БПЛА',      color: '#60a5fa', glow: '#3b82f6', speed: 150,  cat: 'drone'   },
+  kar:       { label: 'KAR',       color: '#fb923c', glow: '#ea580c', speed: 200,  cat: 'drone'   },
   kalibr:    { label: 'Kalibr',    color: '#ef4444', glow: '#dc2626', speed: 700,  cat: 'missile' },
   x101:      { label: 'X-101',     color: '#f87171', glow: '#ef4444', speed: 780,  cat: 'missile' },
   x59:       { label: 'X-59',      color: '#fb923c', glow: '#ea580c', speed: 900,  cat: 'missile' },
@@ -70,6 +71,7 @@ const SHAPES = {
   drone:   'M8,1 L15,14 L8,11 L1,14 Z',
   shahed:  'M8,1 L15,14 L8,11 L1,14 Z',
   geran:   'M8,1 L15,14 L8,11 L1,14 Z',
+  kar:     'M8,1 L15,14 L8,11 L1,14 Z',
   // cruise missiles: slim dart
   missile: 'M8,1 L13,15 L8,12 L3,15 Z',
   kalibr:  'M8,1 L13,15 L8,12 L3,15 Z',

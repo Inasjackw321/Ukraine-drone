@@ -312,6 +312,44 @@ LOCS: dict[str, tuple[float, float]] = {
     "курськ":            (51.73, 36.19),  "воронеж":         (51.67, 39.18),
     "брянськ":           (53.24, 34.36),  "таганрог":        (47.21, 38.93),
     "ростов":            (47.23, 39.72),  "краснодар":       (45.04, 38.98),
+
+    # ── English region names (for English-language posts) ────────────────────
+    "zaporizhzhia region": (47.84, 35.14), "zaporizhia region": (47.84, 35.14),
+    "kharkiv region":    (49.99, 36.23),   "chernihiv region":  (51.50, 31.29),
+    "sumy region":       (50.91, 34.80),   "kyiv region":       (50.52, 30.87),
+    "donetsk region":    (48.02, 37.80),   "luhansk region":    (48.57, 39.31),
+    "dnipropetrovsk region": (48.46, 35.05), "kherson region":  (46.64, 32.62),
+    "mykolaiv region":   (46.98, 31.99),   "odesa region":      (46.48, 30.72),
+    "poltava region":    (49.59, 34.55),   "vinnytsia region":  (49.23, 28.47),
+    "zhytomyr region":   (50.25, 28.66),   "cherkasy region":   (49.44, 32.06),
+
+    # ── English city transliterations ────────────────────────────────────────
+    "ichnya":            (50.85, 32.40),   "bakhmut":           (48.60, 37.99),
+    "kupiansk":          (49.71, 37.61),   "kramatorsk":        (48.72, 37.58),
+    "sloviansk":         (48.86, 37.63),   "lyman":             (49.02, 37.83),
+    "avdiivka":          (48.14, 37.75),   "pokrovsk":          (48.28, 37.18),
+    "toretsk":           (48.41, 37.85),   "chasiv yar":        (48.58, 38.11),
+    "vuhledar":          (47.77, 37.25),   "izium":             (49.21, 37.27),
+    "nikopol":           (47.57, 34.40),   "melitopol":         (46.85, 35.37),
+    "zaporizhzhia":      (47.84, 35.14),   "chernihiv":         (51.50, 31.29),
+    "mykolaiv":          (46.98, 31.99),   "odessa":            (46.48, 30.72),
+    "mariupol":          (47.10, 37.54),   "kherson":           (46.64, 32.62),
+    "poltava":           (49.59, 34.55),   "nizhyn":            (51.05, 31.88),
+    "konotop":           (51.24, 33.21),   "shostka":           (51.87, 33.47),
+    "okhtyrka":          (50.31, 34.90),   "lebedyn":           (50.98, 34.48),
+    "brovary":           (50.51, 30.79),   "bila tserkva":      (49.80, 30.12),
+    "fastiv":            (50.07, 29.91),   "boryspil":          (50.35, 30.96),
+    "kremenchuk":        (49.07, 33.42),   "kryvyi rih":        (47.91, 33.39),
+    "dnipropetrovsk":    (48.46, 35.05),   "severodonetsk":     (48.95, 38.49),
+    "lysychansk":        (48.89, 38.43),   "rubizhne":          (49.02, 38.38),
+    "kreminna":          (49.06, 38.21),   "svatove":           (49.42, 38.17),
+    "starobilsk":        (49.27, 38.91),   "berdyansk":         (46.76, 36.80),
+    "enerhodar":         (47.50, 34.65),   "nova kakhovka":     (46.76, 33.38),
+    "henichesk":         (46.17, 34.82),   "novomoskovsk":      (48.63, 35.23),
+    "pavlohrad":         (48.53, 35.87),   "vovchansk":         (50.29, 36.94),
+    "chuhuiv":           (49.83, 36.68),   "izium":             (49.21, 37.27),
+    "lozova":            (48.89, 36.32),   "balakliya":         (49.46, 36.85),
+    "velykyi burluk":    (50.02, 37.17),   "zmiiv":             (49.68, 36.37),
 }
 
 
@@ -339,49 +377,66 @@ def find_locations(text: str) -> list[dict]:
 
 # Ordered by priority — first match wins for primary type
 THREAT_RE: list[tuple[re.Pattern, str]] = [
-    (re.compile(r"кинджал|kinzhal", re.I),           "kinzhal"),
-    (re.compile(r"іскандер|iskander",  re.I),         "iskander"),
-    (re.compile(r"х-22|x-22",         re.I),          "x22"),
-    (re.compile(r"х-101|x-101|х101",  re.I),          "x101"),
-    (re.compile(r"х-59|x-59",         re.I),          "x59"),
-    (re.compile(r"онікс|oniks",        re.I),          "oniks"),
-    (re.compile(r"калібр|kalibr",      re.I),          "kalibr"),
-    (re.compile(r"шахед|shaheed|shahed", re.I),        "shahed"),
-    (re.compile(r"герань|geran",       re.I),          "geran"),
-    (re.compile(r"балістич",           re.I),          "ballistic"),
-    (re.compile(r"ракет",              re.I),          "missile"),
-    (re.compile(r"бпла|дрон",          re.I),          "drone"),
+    (re.compile(r"кинджал|kinzhal",         re.I), "kinzhal"),
+    (re.compile(r"іскандер|iskander",        re.I), "iskander"),
+    (re.compile(r"х-22|x-22",               re.I), "x22"),
+    (re.compile(r"х-101|x-101|х101",        re.I), "x101"),
+    (re.compile(r"х-59|x-59",               re.I), "x59"),
+    (re.compile(r"х-69|x-69",               re.I), "x59"),
+    (re.compile(r"онікс|oniks",              re.I), "oniks"),
+    (re.compile(r"калібр|kalibr|caliber",   re.I), "kalibr"),
+    (re.compile(r"шахед|shaheed|shahed",    re.I), "shahed"),
+    (re.compile(r"герань|geran",             re.I), "geran"),
+    (re.compile(r"балістич|ballistic",       re.I), "ballistic"),
+    (re.compile(r"\bkar\b",                  re.I), "drone"),   # KAR kamikaze drone
+    (re.compile(r"ракет|missile|rocket",     re.I), "missile"),
+    (re.compile(r"бпла|дрон|uav\b|uavs\b|unmanned aerial", re.I), "drone"),
     (re.compile(
         r"літак|авіац|винищувач|штурмовик|бомбард|гелікоптер|"
-        r"f-16|су-\d+|міг-\d+|helicopter|aircraft|aviation",
-        re.I),                                          "aviation"),
+        r"f-16|су-\d+|міг-\d+|helicopter|aircraft|aviation|tactical aviation",
+        re.I), "aviation"),
 ]
 
 STATUS_RE = {
     "destroyed": re.compile(
-        r"збито|знищено|перехоплено|ліквідовано|збили|знищили|впало|впав|впала|збитий",
+        r"збито|знищено|перехоплено|ліквідовано|збили|знищили|впало|впав|впала|збитий|"
+        r"shot\s+down|downed|intercepted|destroyed|eliminated|neutralized",
         re.I,
     ),
     "moving": re.compile(
         r"рухається|летить|летять|прямує|рухаються|летів|летіла|прямують|"
         r"повз|курсом|у напрямку|в напрямку|на\/повз|зафіксовано|виявлено|"
-        r"помічено|спостерігається|наближається|наближаються|пролетів|пролетіла",
+        r"помічено|спостерігається|наближається|наближаються|пролетів|пролетіла|"
+        r"heading|flying|spotted|detected|direction of|moving|approaching|"
+        r"in the direction|from the",
         re.I,
     ),
-    "launch":  re.compile(r"запущено|пуск|виліт|вилетів|піднявся", re.I),
-    "alert":   re.compile(r"тривога|загроза|увага|небезпека|попередження", re.I),
+    "launch": re.compile(
+        r"запущено|пуск|виліт|вилетів|піднявся|launched|fired|took\s+off",
+        re.I,
+    ),
+    "alert": re.compile(
+        r"тривога|загроза|увага|небезпека|попередження|alert|threat|warning|danger",
+        re.I,
+    ),
 }
 
 FROM_RE = re.compile(
-    r"(?:з боку|з напрямку|від|із)\s+([\w\-'іїєА-ЯіїєҐґЄєІіЇї]{3,}(?:\s+[\w\-'іїєА-ЯіїєҐґЄєІіЇї]{3,})?)",
+    r"(?:з боку|з напрямку|від|із|from\s+the?)\s+([\w\-'іїєА-ЯіїєҐґЄєІіЇї]{3,}(?:\s+[\w\-'іїєА-ЯіїєҐґЄєІіЇї]{3,})?)",
     re.I,
 )
 TO_RE = re.compile(
-    r"(?:у напрямку|в напрямку|\bдо\b|towards?)\s+([\w\-'іїєА-ЯіїєҐґЄєІіЇї]{3,}(?:\s+[\w\-'іїєА-ЯіїєҐґЄєІіЇї]{3,})?)",
+    r"(?:у напрямку|в напрямку|\bдо\b|towards?|direction\s+of)\s+([\w\-'іїєА-ЯіїєҐґЄєІіЇї]{3,}(?:\s+[\w\-'іїєА-ЯіїєҐґЄєІіЇї]{3,})?)",
     re.I,
 )
-COUNT_RE   = re.compile(r"(\d+)\s*(?:шахед|бпла|бпл|ракет|дрон|калібр|кинджал|uav|uavs|drone)", re.I)
-GROUP_RE   = re.compile(r"груп[аиі]|кількох|декількох|декілька|кілька|кільком|group|several|multiple", re.I)
+COUNT_RE = re.compile(
+    r"(\d+)\s*(?:шахед|бпла|бпл|ракет|дрон|калібр|кинджал|uav|uavs|drone|drones|missile|missiles|kar)",
+    re.I,
+)
+GROUP_RE = re.compile(
+    r"груп[аиі]|кількох|декількох|декілька|кілька|кільком|group|several|multiple",
+    re.I,
+)
 
 CHANNEL_NAMES = {
     "kpszsu":    "КПСЗСУ",
@@ -389,6 +444,18 @@ CHANNEL_NAMES = {
     "mon1tor_ua":  "Monitor UA",
     "eradar_ua":   "eRadar UA",
 }
+
+# Regex that splits combined multi-threat messages into individual segments.
+# Ukrainian reports chain events with ";" or start new segments with action emojis.
+_SEGMENT_SPLIT_RE = re.compile(
+    r';\s*|(?<!\A)(?:🚀|💥|⚡|✈️|🛩️|🔴|🟡|🟠|🔵|☠️|💣|🎯)\s*',
+)
+
+
+def split_segments(text: str) -> list[str]:
+    """Split a combined report into individual threat segments."""
+    parts = _SEGMENT_SPLIT_RE.split(text)
+    return [p.strip() for p in parts if len(p.strip()) >= 12]
 
 
 def parse_message(text: str, channel: str, msg_id: int = 0) -> dict | None:
@@ -641,7 +708,7 @@ async def _telegram_loop(cfg: dict) -> None:
     last_ids: dict[str, int] = {s: 0 for s in entities.values()}
 
     while True:
-        cutoff = datetime.now(timezone.utc) - timedelta(seconds=600)
+        cutoff = datetime.now(timezone.utc) - timedelta(seconds=1800)  # 30 min = EXPIRE_MS
 
         for eid, slug in entities.items():
             try:
@@ -656,14 +723,21 @@ async def _telegram_loop(cfg: dict) -> None:
                 # Telethon may return naive or aware datetimes — normalise to UTC
                 msg_date = msg.date if msg.date.tzinfo else msg.date.replace(tzinfo=timezone.utc)
                 if msg_date < cutoff:
-                    continue  # older than 10 minutes, skip
+                    continue  # older than 30 minutes, skip
                 if msg.id <= last_ids[slug]:
                     continue  # already processed
                 last_ids[slug] = max(last_ids[slug], msg.id)
-                evt = parse_message(msg.message or "", slug, msg.id)
-                if evt:
-                    log.info("[%s] %-10s  %s", slug, evt["type"], evt.get("location", "?"))
-                    push_event(evt)
+
+                # Split combined messages (e.g. "Сумщина: БПЛА; 🚀 Харківщина: ракета")
+                # into individual segments and parse each one separately
+                raw = msg.message or ""
+                segments = split_segments(raw) or [raw]
+                for i, seg in enumerate(segments):
+                    evt = parse_message(seg, slug, msg.id)
+                    if evt:
+                        evt["id"] = f"{msg.id}_{i}"  # stable, unique per segment
+                        log.info("[%s] %-10s  %s", slug, evt["type"], evt.get("location", "?"))
+                        push_event(evt)
 
         nxt = (datetime.now(timezone.utc) + timedelta(seconds=POLL_SECS)).isoformat()
         if _loop and _loop.is_running():

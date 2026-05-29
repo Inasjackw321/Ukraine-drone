@@ -373,12 +373,28 @@ async def _tile_dark(z: int, x: int, y: int):
                     headers={"Cache-Control": "max-age=86400", "Access-Control-Allow-Origin": "*"})
 
 
+def _recent_events(max_age_seconds: int = 1800) -> list[dict]:
+    """Return events younger than max_age_seconds (default 30 min)."""
+    cutoff = datetime.now(timezone.utc) - timedelta(seconds=max_age_seconds)
+    out = []
+    for evt in _events:
+        try:
+            ts = datetime.fromisoformat(evt["ts"].replace("Z", "+00:00"))
+            if ts.tzinfo is None:
+                ts = ts.replace(tzinfo=timezone.utc)
+            if ts >= cutoff:
+                out.append(evt)
+        except Exception:
+            pass
+    return out
+
+
 @web_app.websocket("/ws")
 async def _ws(ws: WebSocket):
     await ws.accept()
     _clients.add(ws)
     try:
-        await ws.send_text(json.dumps({"type": "history", "data": list(_events)[:80]}))
+        await ws.send_text(json.dumps({"type": "history", "data": _recent_events()}))
         while True:
             try:
                 await asyncio.wait_for(ws.receive_text(), timeout=25)

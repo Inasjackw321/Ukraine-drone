@@ -31,7 +31,7 @@ const DEG_PER_KM = 1 / 111;
 const WAYPOINT_TRAVERSE_MS = 22_000;  // 22 seconds
 
 // Threat expires after this long (disappears from map)
-const EXPIRE_MS = 45 * 60 * 1000;
+const EXPIRE_MS = 30 * 60 * 1000;
 
 // ── Map ───────────────────────────────────────────────────────────────────
 const map = L.map('map', {

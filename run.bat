@@ -10,24 +10,39 @@ echo   UKRAINE DRONE MAP
 echo  =====================================================
 echo.
 
-:: Check Python
+:: Find Python - try py launcher first, then python, then python3
+set PYTHON=
+py --version >nul 2>&1
+if not errorlevel 1 (
+    set PYTHON=py
+    goto :found_python
+)
 python --version >nul 2>&1
-if errorlevel 1 (
-    echo  [ERROR] Python is not installed or not on PATH.
-    echo.
-    echo  Download from: https://www.python.org/downloads/
-    echo  IMPORTANT: tick "Add Python to PATH" when installing.
-    echo.
-    pause
-    exit /b 1
+if not errorlevel 1 (
+    set PYTHON=python
+    goto :found_python
+)
+python3 --version >nul 2>&1
+if not errorlevel 1 (
+    set PYTHON=python3
+    goto :found_python
 )
 
-python --version
+echo  [ERROR] Python is not installed or not on PATH.
+echo.
+echo  Download from: https://www.python.org/downloads/
+echo  IMPORTANT: tick "Add Python to PATH" when installing.
+echo.
+pause
+exit /b 1
+
+:found_python
+%PYTHON% --version
 echo.
 
 :: Install / update dependencies automatically
 echo  Checking dependencies...
-pip install -r requirements.txt --quiet --no-warn-script-location
+%PYTHON% -m pip install -r requirements.txt --quiet --no-warn-script-location
 echo  Dependencies OK.
 echo.
 
@@ -35,7 +50,7 @@ echo.
 echo  Starting app...
 echo  =====================================================
 echo.
-python app.py %*
+%PYTHON% app.py %*
 
 :: Always pause so the window stays open and errors are readable
 echo.

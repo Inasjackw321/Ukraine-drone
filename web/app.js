@@ -165,6 +165,7 @@ function popup(evt) {
 
 // ── Threat state ──────────────────────────────────────────────────────────
 const threats = new Map();  // id → { evt, marker, antPath, trails[], animFrame, cancelled }
+const seenIds = new Set();  // dedup across WS push + HTTP poll
 let totalCount = 0;
 
 function addThreat(evt) {
@@ -189,16 +190,20 @@ function addThreat(evt) {
   marker.bindPopup(popup(evt), { maxWidth: 280 });
   marker.addTo(layers.markers);
 
-  // Ant-path trajectory
+  // Ant-path trajectory (optional — skip if plugin not loaded)
   let antPath = null;
   const trailLines = [];
   if (wps.length >= 2) {
     const lls = wps.map(w => [w.lat, w.lon]);
-    antPath = L.polyline.antPath(lls, {
-      delay: 600, dashArray: [8, 16], weight: 2,
-      color: def.color, pulseColor: '#fff',
-      hardwareAccelerated: true,
-    }).addTo(layers.paths);
+    if (L.polyline.antPath) {
+      try {
+        antPath = L.polyline.antPath(lls, {
+          delay: 600, dashArray: [8, 16], weight: 2,
+          color: def.color, pulseColor: '#fff',
+          hardwareAccelerated: true,
+        }).addTo(layers.paths);
+      } catch (_) {}
+    }
 
     // Faint historical trail
     trailLines.push(L.polyline(lls, {
@@ -416,9 +421,12 @@ function connect() {
 }
 
 function handleEvent(evt) {
+  if (!evt || !evt.id || seenIds.has(evt.id)) return;
+  seenIds.add(evt.id);
   totalCount++;
-  addThreat(evt);
-  addFeedItem(evt);
+  try { addThreat(evt); } catch(e) { console.error('addThreat', e, evt); }
+  try { addFeedItem(evt); } catch(e) { console.error('addFeedItem', e, evt); }
+  updateStats();
 }
 
 function setConn(state) {
@@ -428,8 +436,22 @@ function setConn(state) {
   txt.textContent = { connecting: 'Connecting…', live: 'Connected', error: 'Reconnecting…' }[state];
 }
 
+// ── HTTP polling — reliable fallback if WebSocket push fails ─────────────
+// Polls /api/events every 5 s and merges any events not yet seen via WS.
+async function pollEvents() {
+  try {
+    const r = await fetch('/api/events');
+    if (r.ok) {
+      const { events } = await r.json();
+      (events || []).forEach(handleEvent);
+    }
+  } catch (_) {}
+  setTimeout(pollEvents, 5000);
+}
+
 // ── Boot ──────────────────────────────────────────────────────────────────
 connect();
+pollEvents();
 setInterval(() => {
   const now = Date.now();
   for (const [id, o] of threats)

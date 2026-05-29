@@ -135,6 +135,11 @@ header {
   border: 2px solid; flex-shrink: 0; display: inline-block;
 }
 
+/* ── Dark tile layer (inverts any tile source to dark) ───────────────────── */
+.leaflet-tile-pane {
+  filter: invert(1) hue-rotate(180deg) brightness(0.75) contrast(0.85) saturate(0.6);
+}
+
 /* ── Leaflet dark popup ──────────────────────────────────────────────────── */
 .leaflet-popup-content-wrapper {
   background: #0b0f15; border: 1px solid var(--border);

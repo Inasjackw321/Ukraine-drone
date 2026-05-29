@@ -434,7 +434,7 @@ def _index():
 
 @web_app.get("/api/events")
 def _get_events():
-    return {"events": list(_events)[:100]}
+    return {"events": _recent_events()}
 
 
 @web_app.get("/api/stats")

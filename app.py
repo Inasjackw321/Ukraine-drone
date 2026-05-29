@@ -21,6 +21,29 @@ from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 # ─────────────────────────────────────────────────────────────────────────────
+# Dependency pre-check — show a readable error before anything can crash
+# ─────────────────────────────────────────────────────────────────────────────
+def _check_deps() -> None:
+    required = {
+        "fastapi":   "pip install fastapi",
+        "uvicorn":   "pip install uvicorn[standard]",
+        "telethon":  "pip install telethon",
+        "aiofiles":  "pip install aiofiles",
+        "websockets":"pip install websockets",
+    }
+    missing = [f"  {pkg:12s}  →  {cmd}" for pkg, cmd in required.items()
+               if __import__("importlib").util.find_spec(pkg) is None]
+    if missing:
+        print("\n  ── Missing packages ──────────────────────────────────")
+        print("\n".join(missing))
+        print("\n  Fix all at once:  pip install -r requirements.txt")
+        print("─" * 54)
+        input("\n  Press Enter to close…")
+        sys.exit(1)
+
+_check_deps()
+
+# ─────────────────────────────────────────────────────────────────────────────
 # Logging
 # ─────────────────────────────────────────────────────────────────────────────
 logging.basicConfig(
@@ -631,4 +654,13 @@ def main() -> None:
 
 
 if __name__ == "__main__":
-    main()
+    try:
+        main()
+    except Exception as exc:
+        import traceback
+        print("\n" + "─" * 54)
+        print("  APP CRASHED")
+        print("─" * 54)
+        traceback.print_exc()
+        print("─" * 54)
+        input("\n  Press Enter to close…")

@@ -24,6 +24,7 @@ from pathlib import Path
 # Dependency pre-check — show a readable error before anything can crash
 # ─────────────────────────────────────────────────────────────────────────────
 def _check_deps() -> None:
+    import importlib.util as _ilu
     required = {
         "fastapi":   "pip install fastapi",
         "uvicorn":   "pip install uvicorn[standard]",
@@ -32,7 +33,7 @@ def _check_deps() -> None:
         "websockets":"pip install websockets",
     }
     missing = [f"  {pkg:12s}  →  {cmd}" for pkg, cmd in required.items()
-               if __import__("importlib").util.find_spec(pkg) is None]
+               if _ilu.find_spec(pkg) is None]
     if missing:
         print("\n  ── Missing packages ──────────────────────────────────")
         print("\n".join(missing))

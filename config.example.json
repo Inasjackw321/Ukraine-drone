@@ -1,0 +1,8 @@
+{
+  "telegram": {
+    "api_id": 12345678,
+    "api_hash": "your_api_hash_from_my.telegram.org",
+    "phone": "+380XXXXXXXXX"
+  },
+  "channels": ["kpszsu", "war_monitor", "mon1tor_ua"]
+}

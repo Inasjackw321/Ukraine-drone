@@ -1,0 +1,604 @@
+#!/usr/bin/env python3
+"""
+Ukraine Drone Map
+Run:  python app.py           (uses config.json if present, otherwise demo)
+      python app.py --demo    (always demo mode)
+      python app.py --setup   (configure Telegram credentials)
+"""
+
+import argparse
+import asyncio
+import json
+import logging
+import os
+import re
+import sys
+import threading
+import time
+import uuid
+from collections import deque
+from datetime import datetime, timedelta, timezone
+from pathlib import Path
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Logging
+# ─────────────────────────────────────────────────────────────────────────────
+logging.basicConfig(
+    format="%(asctime)s  %(levelname)-7s  %(message)s",
+    datefmt="%H:%M:%S",
+    level=logging.INFO,
+)
+log = logging.getLogger("ukraine-drone")
+
+HERE   = Path(__file__).parent
+WEB    = HERE / "web"
+CONFIG = HERE / "config.json"
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Ukrainian Locations  (lat, lon)
+# ─────────────────────────────────────────────────────────────────────────────
+LOCS: dict[str, tuple[float, float]] = {
+    # ── oblasts ──────────────────────────────────────────────────────────────
+    "київська": (50.52, 30.87),     "київщина": (50.52, 30.87),
+    "харківська": (49.99, 36.23),   "харківщина": (49.99, 36.23),
+    "дніпропетровська": (48.46, 35.05), "дніпровська": (48.46, 35.05),
+    "одеська": (46.48, 30.72),      "одещина": (46.48, 30.72),
+    "запорізька": (47.84, 35.14),   "запоріжжя область": (47.84, 35.14),
+    "миколаївська": (46.98, 31.99), "миколаївщина": (46.98, 31.99),
+    "херсонська": (46.64, 32.62),   "херсонщина": (46.64, 32.62),
+    "донецька": (48.02, 37.80),     "донеччина": (48.02, 37.80),
+    "луганська": (48.57, 39.31),    "луганщина": (48.57, 39.31),
+    "сумська": (50.91, 34.80),      "сумщина": (50.91, 34.80),
+    "чернігівська": (51.50, 31.29), "чернігівщина": (51.50, 31.29),
+    "полтавська": (49.59, 34.55),   "полтавщина": (49.59, 34.55),
+    "черкаська": (49.44, 32.06),    "черкащина": (49.44, 32.06),
+    "кіровоградська": (48.51, 32.26),
+    "вінницька": (49.23, 28.47),    "вінниччина": (49.23, 28.47),
+    "житомирська": (50.25, 28.66),  "житомирщина": (50.25, 28.66),
+    "хмельницька": (49.42, 26.99),  "хмельниччина": (49.42, 26.99),
+    "тернопільська": (49.55, 25.59),"тернопільщина": (49.55, 25.59),
+    "рівненська": (50.62, 26.25),   "рівненщина": (50.62, 26.25),
+    "волинська": (50.75, 25.33),    "волинь": (50.75, 25.33),
+    "львівська": (49.84, 24.03),    "львівщина": (49.84, 24.03),
+    "закарпатська": (48.62, 22.29), "закарпаття": (48.62, 22.29),
+    "івано-франківська": (48.92, 24.71), "прикарпаття": (48.92, 24.71),
+    "чернівецька": (48.29, 25.94),  "буковина": (48.29, 25.94),
+
+    # ── major cities ─────────────────────────────────────────────────────────
+    "київ": (50.45, 30.52),       "kyiv": (50.45, 30.52),
+    "харків": (49.99, 36.23),     "kharkiv": (49.99, 36.23),
+    "харкові": (49.99, 36.23),    "харкова": (49.99, 36.23),
+    "дніпро": (48.46, 35.05),     "dnipro": (48.46, 35.05),
+    "одеса": (46.48, 30.72),      "одесі": (46.48, 30.72),
+    "запоріжжя": (47.84, 35.14),
+    "миколаїв": (46.98, 31.99),   "миколаєві": (46.98, 31.99),
+    "миколаєвом": (46.98, 31.99), "миколаєва": (46.98, 31.99),
+    "херсон": (46.64, 32.62),     "херсоні": (46.64, 32.62),
+    "донецьк": (48.02, 37.80),
+    "луганськ": (48.57, 39.31),
+    "суми": (50.91, 34.80),       "сумах": (50.91, 34.80),
+    "чернігів": (51.50, 31.29),   "чернігові": (51.50, 31.29),
+    "полтава": (49.59, 34.55),    "полтаві": (49.59, 34.55),
+    "черкаси": (49.44, 32.06),
+    "вінниця": (49.23, 28.47),    "вінниці": (49.23, 28.47),
+    "житомир": (50.25, 28.66),    "житомирі": (50.25, 28.66),
+    "хмельницький": (49.42, 26.99),
+    "тернопіль": (49.55, 25.59),  "тернополі": (49.55, 25.59),
+    "рівне": (50.62, 26.25),      "рівного": (50.62, 26.25),
+    "луцьк": (50.75, 25.33),
+    "львів": (49.84, 24.03),
+    "ужгород": (48.62, 22.29),
+    "івано-франківськ": (48.92, 24.71),
+    "чернівці": (48.29, 25.94),
+    "кропивницький": (48.51, 32.26),
+    "маріуполь": (47.10, 37.54),  "маріуполі": (47.10, 37.54),
+    "краматорськ": (48.72, 37.58),
+    "слов'янськ": (48.86, 37.63),
+    "бахмут": (48.60, 37.99),
+    "кривий ріг": (47.91, 33.39),
+    "кременчук": (49.07, 33.42),
+    "нікополь": (47.57, 34.40),
+    "мелітополь": (46.85, 35.37),
+    "бердянськ": (46.76, 36.80),
+    "запоріжжям": (47.84, 35.14),
+    "енергодар": (47.50, 34.65),
+    "нова каховка": (46.76, 33.38),
+    "буча": (50.55, 30.23),
+    "ірпінь": (50.52, 30.25),
+    "бровари": (50.51, 30.79),
+    "біла церква": (49.80, 30.12),
+    "конотоп": (51.24, 33.21),
+    "шостка": (51.87, 33.47),
+    "охтирка": (50.31, 34.90),
+    "куп'янськ": (49.71, 37.61), "куп'янська": (49.71, 37.61),
+    "ізюм": (49.21, 37.27),
+    "лозова": (48.89, 36.32),
+    "чугуїв": (49.83, 36.68),
+
+    # ── geographic / cross-border ─────────────────────────────────────────────
+    "крим": (44.95, 34.10),       "crimea": (44.95, 34.10),
+    "чорне море": (45.50, 31.50),
+    "азовське море": (46.00, 36.50),
+    "білорусь": (52.50, 28.00),
+    "росія": (51.00, 38.00),
+}
+
+
+def find_locations(text: str) -> list[dict]:
+    """Return list of {name, lat, lon} found in text (longest match wins)."""
+    tl = text.lower()
+    results: list[dict] = []
+    covered: list[tuple[int, int]] = []
+    for key in sorted(LOCS, key=len, reverse=True):
+        i = tl.find(key)
+        if i == -1:
+            continue
+        end = i + len(key)
+        if any(s <= i and end <= e for s, e in covered):
+            continue
+        covered.append((i, end))
+        lat, lon = LOCS[key]
+        results.append({"name": text[i:end], "lat": lat, "lon": lon})
+    return results
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Message Parser
+# ─────────────────────────────────────────────────────────────────────────────
+
+# Ordered by priority — first match wins for primary type
+THREAT_RE: list[tuple[re.Pattern, str]] = [
+    (re.compile(r"кинджал|kinzhal", re.I),           "kinzhal"),
+    (re.compile(r"іскандер|iskander",  re.I),         "iskander"),
+    (re.compile(r"х-22|x-22",         re.I),          "x22"),
+    (re.compile(r"х-101|x-101|х101",  re.I),          "x101"),
+    (re.compile(r"х-59|x-59",         re.I),          "x59"),
+    (re.compile(r"онікс|oniks",        re.I),          "oniks"),
+    (re.compile(r"калібр|kalibr",      re.I),          "kalibr"),
+    (re.compile(r"шахед|shaheed|shahed", re.I),        "shahed"),
+    (re.compile(r"герань|geran",       re.I),          "geran"),
+    (re.compile(r"балістич",           re.I),          "ballistic"),
+    (re.compile(r"ракет",              re.I),          "missile"),
+    (re.compile(r"бпла|дрон",          re.I),          "drone"),
+]
+
+STATUS_RE = {
+    "destroyed": re.compile(r"збито|знищено|перехоплено|ліквідовано|збили|знищили", re.I),
+    "moving":    re.compile(r"рухається|летить|летять|прямує|рухаються|летів|летіла", re.I),
+    "launch":    re.compile(r"запущено|пуск|виліт|вилетів|зафіксовано", re.I),
+    "alert":     re.compile(r"тривога|загроза|увага|небезпека|попередження", re.I),
+}
+
+FROM_RE = re.compile(
+    r"(?:з боку|з напрямку|від|із)\s+([\w\-'іїєА-ЯіїєҐґЄєІіЇї]{3,}(?:\s+[\w\-'іїєА-ЯіїєҐґЄєІіЇї]{3,})?)",
+    re.I,
+)
+TO_RE = re.compile(
+    r"(?:у напрямку|в напрямку|\bдо\b|towards?)\s+([\w\-'іїєА-ЯіїєҐґЄєІіЇї]{3,}(?:\s+[\w\-'іїєА-ЯіїєҐґЄєІіЇї]{3,})?)",
+    re.I,
+)
+COUNT_RE = re.compile(r"(\d+)\s*(?:шахед|бпла|ракет|дрон|калібр|кинджал)", re.I)
+
+CHANNEL_NAMES = {"kpszsu": "КПСЗСУ", "war_monitor": "War Monitor", "mon1tor_ua": "Monitor UA"}
+
+
+def parse_message(text: str, channel: str, msg_id: int = 0) -> dict | None:
+    if not text or len(text) < 15:
+        return None
+
+    # Detect primary threat type
+    threat = "unknown"
+    for pat, name in THREAT_RE:
+        if pat.search(text):
+            threat = name
+            break
+
+    locs = find_locations(text)
+    if not locs and threat in ("unknown", "missile", "drone"):
+        return None  # not a useful event
+
+    # Status
+    status = "unknown"
+    for st, pat in STATUS_RE.items():
+        if pat.search(text):
+            status = st
+            break
+
+    # Count
+    m = COUNT_RE.search(text)
+    count = int(m.group(1)) if m else 1
+
+    # Directions
+    frm = (FROM_RE.search(text) or type("", (), {"group": lambda s, i: None})()).group(1)
+    to  = (TO_RE.search(text)   or type("", (), {"group": lambda s, i: None})()).group(1)
+
+    import random
+    primary = locs[0] if locs else None
+
+    return {
+        "id":        str(uuid.uuid4()),
+        "ts":        datetime.now(timezone.utc).isoformat(),
+        "channel":   CHANNEL_NAMES.get(channel, channel),
+        "msg_id":    msg_id,
+        "text":      text[:400],
+        "type":      threat,
+        "status":    status,
+        "count":     count,
+        "from":      frm,
+        "to":        to,
+        "lat":       (primary["lat"] + random.uniform(-0.04, 0.04)) if primary else None,
+        "lon":       (primary["lon"] + random.uniform(-0.04, 0.04)) if primary else None,
+        "location":  primary["name"] if primary else None,
+        "waypoints": [{"lat": l["lat"], "lon": l["lon"], "name": l["name"]} for l in locs],
+    }
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# FastAPI + WebSocket hub
+# ─────────────────────────────────────────────────────────────────────────────
+from contextlib import asynccontextmanager
+
+from fastapi import FastAPI, WebSocket, WebSocketDisconnect
+from fastapi.responses import FileResponse
+from fastapi.staticfiles import StaticFiles
+
+_events: deque[dict] = deque(maxlen=500)
+_clients: set[WebSocket] = set()
+_loop: asyncio.AbstractEventLoop | None = None
+_stats = {"total": 0, "channels": set()}
+
+
+@asynccontextmanager
+async def _lifespan(app):
+    global _loop
+    _loop = asyncio.get_running_loop()
+    yield
+
+
+web_app = FastAPI(lifespan=_lifespan)
+
+
+def push_event(evt: dict) -> None:
+    _events.appendleft(evt)
+    _stats["total"] += 1
+    _stats["channels"].add(evt.get("channel", ""))
+    if _loop and _loop.is_running():
+        asyncio.run_coroutine_threadsafe(_broadcast({"type": "event", "data": evt}), _loop)
+
+
+async def _broadcast(msg: dict) -> None:
+    text = json.dumps(msg)
+    dead: set[WebSocket] = set()
+    for ws in _clients.copy():
+        try:
+            await ws.send_text(text)
+        except Exception:
+            dead.add(ws)
+    _clients -= dead
+
+
+@web_app.get("/")
+def _index():
+    return FileResponse(WEB / "index.html")
+
+
+@web_app.get("/api/events")
+def _get_events():
+    return {"events": list(_events)[:100]}
+
+
+@web_app.get("/api/stats")
+def _get_stats():
+    return {**_stats, "channels": list(_stats["channels"]), "clients": len(_clients)}
+
+
+@web_app.websocket("/ws")
+async def _ws(ws: WebSocket):
+    await ws.accept()
+    _clients.add(ws)
+    try:
+        await ws.send_text(json.dumps({"type": "history", "data": list(_events)[:80]}))
+        while True:
+            try:
+                await asyncio.wait_for(ws.receive_text(), timeout=25)
+            except asyncio.TimeoutError:
+                await ws.send_text('{"type":"ping"}')
+    except (WebSocketDisconnect, Exception):
+        pass
+    finally:
+        _clients.discard(ws)
+
+
+if WEB.exists():
+    web_app.mount("/static", StaticFiles(directory=str(WEB)), name="static")
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Telegram polling  (10-minute cycle)
+# ─────────────────────────────────────────────────────────────────────────────
+CHANNELS = ["kpszsu", "war_monitor", "mon1tor_ua"]
+POLL_SECS = 600  # 10 minutes
+
+
+async def _telegram_loop(cfg: dict) -> None:
+    try:
+        from telethon import TelegramClient
+    except ImportError:
+        log.error("telethon not installed — pip install telethon")
+        return
+
+    tg = cfg.get("telegram", {})
+    client = TelegramClient(
+        str(HERE / "session"),
+        int(tg["api_id"]),
+        tg["api_hash"],
+    )
+    await client.start(phone=tg.get("phone", ""))
+    log.info("Telegram authenticated")
+
+    entities: dict[int, str] = {}
+    for slug in cfg.get("channels", CHANNELS):
+        try:
+            ent = await client.get_entity(slug)
+            entities[ent.id] = slug
+            log.info("  channel ready: @%s", slug)
+        except Exception as e:
+            log.warning("  can't resolve @%s — %s", slug, e)
+
+    last_ids: dict[str, int] = {s: 0 for s in entities.values()}
+    first_pass = True
+
+    while True:
+        for eid, slug in entities.items():
+            try:
+                msgs = await client.get_messages(
+                    eid,
+                    limit=30 if first_pass else 50,
+                    min_id=0 if first_pass else last_ids[slug],
+                )
+            except Exception as e:
+                log.warning("fetch error %s: %s", slug, e)
+                continue
+
+            for msg in reversed(msgs or []):
+                if msg.id <= last_ids[slug]:
+                    continue
+                last_ids[slug] = msg.id
+                evt = parse_message(msg.message or "", slug, msg.id)
+                if evt:
+                    log.info("[%s] %-10s  %s", slug, evt["type"], evt.get("location", "?"))
+                    push_event(evt)
+
+        first_pass = False
+
+        nxt = (datetime.now(timezone.utc) + timedelta(seconds=POLL_SECS)).isoformat()
+        if _loop and _loop.is_running():
+            asyncio.run_coroutine_threadsafe(
+                _broadcast({"type": "next_update", "at": nxt}), _loop
+            )
+        log.info("Next Telegram poll in %d minutes", POLL_SECS // 60)
+        await asyncio.sleep(POLL_SECS)
+
+
+def _run_telegram(cfg: dict) -> None:
+    loop = asyncio.new_event_loop()
+    asyncio.set_event_loop(loop)
+    try:
+        loop.run_until_complete(_telegram_loop(cfg))
+    except Exception as e:
+        log.error("Telegram monitor crashed: %s", e)
+    finally:
+        loop.close()
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Demo mode
+# ─────────────────────────────────────────────────────────────────────────────
+_DEMO = [
+    {
+        "type": "shahed", "status": "moving", "count": 6,
+        "channel": "War Monitor",
+        "location": "Харків",
+        "text": "🚨 6 Шахедів зафіксовано у Харківській обл. Рухаються з боку Росії у напрямку Харкова.",
+        "waypoints": [
+            {"lat": 50.60, "lon": 37.80, "name": "Бєлгород (RU)"},
+            {"lat": 50.30, "lon": 37.10, "name": "Куп'янськ"},
+            {"lat": 49.99, "lon": 36.23, "name": "Харків"},
+        ],
+        "from": "Росія", "to": "Харків",
+    },
+    {
+        "type": "kalibr", "status": "moving", "count": 2,
+        "channel": "КПСЗСУ",
+        "location": "Запоріжжя",
+        "text": "⚠️ Калібри над Херсонщиною, рухаються у напрямку Запоріжжя.",
+        "waypoints": [
+            {"lat": 45.50, "lon": 33.00, "name": "Крим"},
+            {"lat": 46.64, "lon": 32.62, "name": "Херсон"},
+            {"lat": 47.84, "lon": 35.14, "name": "Запоріжжя"},
+        ],
+        "from": "Крим", "to": "Запоріжжя",
+    },
+    {
+        "type": "drone", "status": "alert", "count": 4,
+        "channel": "Monitor UA",
+        "location": "Київ",
+        "text": "❗️ Повітряна тривога в Київській та Чернігівській обл. 4 БПЛА рухаються з боку Білорусі.",
+        "waypoints": [
+            {"lat": 52.40, "lon": 30.50, "name": "Білорусь"},
+            {"lat": 51.50, "lon": 31.29, "name": "Чернігів"},
+            {"lat": 50.45, "lon": 30.52, "name": "Київ"},
+        ],
+        "from": "Білорусь", "to": "Київ",
+    },
+    {
+        "type": "x101", "status": "moving", "count": 3,
+        "channel": "КПСЗСУ",
+        "location": "Вінниця",
+        "text": "🚀 Х-101 зафіксовані над Хмельниччиною, рухаються у напрямку Вінниці.",
+        "waypoints": [
+            {"lat": 52.00, "lon": 25.00, "name": "Білорусь"},
+            {"lat": 50.62, "lon": 26.25, "name": "Рівне"},
+            {"lat": 49.42, "lon": 26.99, "name": "Хмельницький"},
+            {"lat": 49.23, "lon": 28.47, "name": "Вінниця"},
+        ],
+        "from": "Білорусь", "to": "Захід",
+    },
+    {
+        "type": "kinzhal", "status": "launch", "count": 1,
+        "channel": "КПСЗСУ",
+        "location": "Київ",
+        "text": "🔴 Кинджал! Гіперзвукова ракета зафіксована. Тривога по всій країні.",
+        "waypoints": [
+            {"lat": 55.00, "lon": 37.00, "name": "Москва (RU)"},
+            {"lat": 53.50, "lon": 34.50, "name": "Брянськ (RU)"},
+            {"lat": 51.50, "lon": 31.29, "name": "Чернігів"},
+            {"lat": 50.45, "lon": 30.52, "name": "Київ"},
+        ],
+        "from": "Росія",
+    },
+    {
+        "type": "shahed", "status": "destroyed", "count": 3,
+        "channel": "War Monitor",
+        "location": "Одеса",
+        "text": "✅ Збито 3 Шахеди над Одеською обл. ППО відпрацювала.",
+        "waypoints": [
+            {"lat": 45.50, "lon": 31.50, "name": "Чорне море"},
+            {"lat": 46.48, "lon": 30.72, "name": "Одеса"},
+        ],
+        "from": "Чорне море",
+    },
+    {
+        "type": "iskander", "status": "moving", "count": 1,
+        "channel": "КПСЗСУ",
+        "location": "Дніпро",
+        "text": "⚡ Іскандер зафіксований. Рухається у напрямку Дніпра.",
+        "waypoints": [
+            {"lat": 47.50, "lon": 37.90, "name": "Донецьк (TOT)"},
+            {"lat": 48.02, "lon": 36.50, "name": "Запорізька"},
+            {"lat": 48.46, "lon": 35.05, "name": "Дніпро"},
+        ],
+        "from": "Схід", "to": "Дніпро",
+    },
+]
+
+
+def _run_demo() -> None:
+    import random
+    time.sleep(2)
+    log.info("Demo mode — injecting sample events")
+    i = 0
+    while True:
+        base = _DEMO[i % len(_DEMO)]
+        evt: dict = {
+            "id":       str(uuid.uuid4()),
+            "ts":       datetime.now(timezone.utc).isoformat(),
+            "msg_id":   0,
+            **base,
+        }
+        # Slight position jitter so same events don't overlap exactly
+        if evt.get("waypoints"):
+            last = evt["waypoints"][-1]
+            evt["lat"] = last["lat"] + random.uniform(-0.12, 0.12)
+            evt["lon"] = last["lon"] + random.uniform(-0.12, 0.12)
+        push_event(evt)
+        log.info("[demo] %-10s  %s", evt["type"], evt.get("location", ""))
+        i += 1
+        time.sleep(random.uniform(12, 25))
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Setup wizard
+# ─────────────────────────────────────────────────────────────────────────────
+def _run_setup() -> dict:
+    print("\n" + "━" * 54)
+    print("  Ukraine Drone Map — Telegram Setup")
+    print("━" * 54)
+    print("\n  Get free API credentials at:  https://my.telegram.org/apps\n")
+    api_id   = input("  API ID (number): ").strip()
+    api_hash = input("  API Hash:        ").strip()
+    phone    = input("  Phone (+380…):   ").strip()
+    cfg = {
+        "telegram": {"api_id": int(api_id), "api_hash": api_hash, "phone": phone},
+        "channels": CHANNELS,
+    }
+    with open(CONFIG, "w") as f:
+        json.dump(cfg, f, indent=2)
+    print("\n  ✓ Saved to config.json\n")
+    return cfg
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Entry point
+# ─────────────────────────────────────────────────────────────────────────────
+def main() -> None:
+    ap = argparse.ArgumentParser(description="Ukraine Drone Map")
+    ap.add_argument("--demo",    action="store_true", help="Force demo mode")
+    ap.add_argument("--setup",   action="store_true", help="Configure Telegram")
+    ap.add_argument("--browser", action="store_true", help="Open in browser only")
+    ap.add_argument("--port",    type=int, default=8765)
+    args = ap.parse_args()
+
+    print()
+    print("  ╔══════════════════════════════════════╗")
+    print("  ║  🛡️  UKRAINE DRONE MAP                ║")
+    print("  ╚══════════════════════════════════════╝")
+    print()
+
+    # ── Config ────────────────────────────────────────────────────────────────
+    if args.setup:
+        cfg = _run_setup()
+    elif CONFIG.exists():
+        with open(CONFIG) as f:
+            cfg = json.load(f)
+    else:
+        cfg = {}
+
+    # ── Server ────────────────────────────────────────────────────────────────
+    import uvicorn
+    t = threading.Thread(
+        target=lambda: uvicorn.run(
+            web_app, host="127.0.0.1", port=args.port,
+            log_level="warning", reload=False,
+        ),
+        daemon=True, name="server",
+    )
+    t.start()
+    time.sleep(1.2)
+    url = f"http://127.0.0.1:{args.port}"
+    log.info("Server ready at %s", url)
+
+    # ── Data source ────────────────────────────────────────────────────────────
+    if args.demo or not cfg.get("telegram", {}).get("api_id"):
+        if not args.demo:
+            log.warning("No config.json found — running in DEMO mode")
+            log.warning("Run with --setup to configure real Telegram data")
+        threading.Thread(target=_run_demo, daemon=True, name="demo").start()
+    else:
+        threading.Thread(
+            target=_run_telegram, args=(cfg,), daemon=True, name="telegram"
+        ).start()
+
+    # ── Open UI ────────────────────────────────────────────────────────────────
+    if not args.browser:
+        try:
+            import webview
+            log.info("Opening desktop window")
+            webview.create_window("Ukraine Drone Map", url=url, width=1440, height=900, resizable=True)
+            webview.start()
+            return
+        except ImportError:
+            pass
+
+    import webbrowser
+    webbrowser.open(url)
+    log.info("Opened in browser — Ctrl+C to quit")
+    try:
+        while True:
+            time.sleep(1)
+    except KeyboardInterrupt:
+        log.info("Shutting down")
+
+
+if __name__ == "__main__":
+    main()

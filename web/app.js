@@ -40,13 +40,12 @@ const map = L.map('map', {
 });
 L.control.zoom({ position: 'topright' }).addTo(map);
 
-L.tileLayer('https://{s}.basemaps.cartocdn.com/dark_matter_nolabels/{z}/{x}/{y}{r}.png', {
-  subdomains: 'abcd', maxZoom: 18,
-}).addTo(map);
-
-// Subtle labels layer on top
-L.tileLayer('https://{s}.basemaps.cartocdn.com/dark_matter_only_labels/{z}/{x}/{y}{r}.png', {
-  subdomains: 'abcd', maxZoom: 18, opacity: 0.5,
+// Tiles are proxied through localhost so they load inside pywebview without
+// any CORS/CSP issues. The server fetches from CartoDB and caches them.
+L.tileLayer('/tiles/{z}/{x}/{y}.png', {
+  maxZoom: 18,
+  // Fallback to CartoDB directly if the proxy fails (browser mode)
+  errorTileUrl: 'https://a.basemaps.cartocdn.com/dark_matter_nolabels/0/0/0.png',
 }).addTo(map);
 
 // Ukraine border outline
@@ -409,7 +408,9 @@ function connect() {
       [...m.data].reverse().forEach(handleEvent);
     } else if (m.type === 'next_update') {
       nextUpdateAt = new Date(m.at).getTime();
-      document.getElementById('update-txt').textContent = 'Next update 10:00';
+    } else if (m.type === 'mode') {
+      const banner = document.getElementById('demo-banner');
+      if (m.demo) banner.style.display = 'block';
     }
   };
 }

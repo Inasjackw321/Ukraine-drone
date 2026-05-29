@@ -179,7 +179,12 @@ TO_RE = re.compile(
 )
 COUNT_RE = re.compile(r"(\d+)\s*(?:шахед|бпла|ракет|дрон|калібр|кинджал)", re.I)
 
-CHANNEL_NAMES = {"kpszsu": "КПСЗСУ", "war_monitor": "War Monitor", "mon1tor_ua": "Monitor UA"}
+CHANNEL_NAMES = {
+    "kpszsu":    "КПСЗСУ",
+    "war_monitor": "War Monitor",
+    "mon1tor_ua":  "Monitor UA",
+    "eradar_ua":   "eRadar UA",
+}
 
 
 def parse_message(text: str, channel: str, msg_id: int = 0) -> dict | None:
@@ -239,13 +244,14 @@ def parse_message(text: str, channel: str, msg_id: int = 0) -> dict | None:
 from contextlib import asynccontextmanager
 
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect
-from fastapi.responses import FileResponse
+from fastapi.responses import FileResponse, Response
 from fastapi.staticfiles import StaticFiles
 
 _events: deque[dict] = deque(maxlen=500)
 _clients: set[WebSocket] = set()
 _loop: asyncio.AbstractEventLoop | None = None
-_stats = {"total": 0, "channels": set()}
+_stats    = {"total": 0, "channels": set()}
+_is_demo  = True   # set at startup; sent to frontend so it can show a banner
 
 
 @asynccontextmanager
@@ -289,7 +295,39 @@ def _get_events():
 
 @web_app.get("/api/stats")
 def _get_stats():
-    return {**_stats, "channels": list(_stats["channels"]), "clients": len(_clients)}
+    return {**_stats, "channels": list(_stats["channels"]), "clients": len(_clients),
+            "demo": _is_demo}
+
+
+# ── Tile proxy — serves map tiles through localhost so pywebview can load them
+_tile_cache: dict[str, bytes] = {}   # simple in-memory cache (clears on restart)
+
+async def _fetch_tile(url: str) -> bytes | None:
+    if url in _tile_cache:
+        return _tile_cache[url]
+    import urllib.request
+    def _get():
+        req = urllib.request.Request(url, headers={"User-Agent": _BROWSER_UA})
+        with urllib.request.urlopen(req, timeout=8) as r:
+            return r.read()
+    try:
+        data = await asyncio.to_thread(_get)
+        if len(_tile_cache) < 2000:   # keep cache bounded
+            _tile_cache[url] = data
+        return data
+    except Exception:
+        return None
+
+
+@web_app.get("/tiles/{z}/{x}/{y}.png")
+async def _tile_dark(z: int, x: int, y: int):
+    data = await _fetch_tile(
+        f"https://a.basemaps.cartocdn.com/dark_matter_nolabels/{z}/{x}/{y}.png"
+    )
+    if data is None:
+        return Response(status_code=503)
+    return Response(content=data, media_type="image/png",
+                    headers={"Cache-Control": "max-age=86400"})
 
 
 @web_app.websocket("/ws")
@@ -297,6 +335,8 @@ async def _ws(ws: WebSocket):
     await ws.accept()
     _clients.add(ws)
     try:
+        # Tell the frontend whether this is demo or live Telegram
+        await ws.send_text(json.dumps({"type": "mode", "demo": _is_demo}))
         await ws.send_text(json.dumps({"type": "history", "data": list(_events)[:80]}))
         while True:
             try:
@@ -316,7 +356,7 @@ if WEB.exists():
 # ─────────────────────────────────────────────────────────────────────────────
 # Telegram polling  (10-minute cycle)
 # ─────────────────────────────────────────────────────────────────────────────
-CHANNELS = ["kpszsu", "war_monitor", "mon1tor_ua"]
+CHANNELS  = ["kpszsu", "war_monitor", "mon1tor_ua", "eradar_ua"]
 POLL_SECS = 600  # 10 minutes
 
 
@@ -529,6 +569,50 @@ def _run_setup() -> dict:
 
 
 # ─────────────────────────────────────────────────────────────────────────────
+# Download Leaflet + ant-path once so the desktop window works fully offline
+# ─────────────────────────────────────────────────────────────────────────────
+_LIB_ASSETS = {
+    "leaflet.css": [
+        "https://cdn.jsdelivr.net/npm/leaflet@1.9.4/dist/leaflet.css",
+        "https://unpkg.com/leaflet@1.9.4/dist/leaflet.css",
+    ],
+    "leaflet.js": [
+        "https://cdn.jsdelivr.net/npm/leaflet@1.9.4/dist/leaflet.js",
+        "https://unpkg.com/leaflet@1.9.4/dist/leaflet.js",
+    ],
+    "ant-path.js": [
+        "https://cdn.jsdelivr.net/npm/leaflet-ant-path@1.3.0/dist/leaflet-ant-path.js",
+        "https://unpkg.com/leaflet-ant-path@1.3.0/dist/leaflet-ant-path.js",
+    ],
+}
+
+_BROWSER_UA = (
+    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+    "AppleWebKit/537.36 (KHTML, like Gecko) "
+    "Chrome/124.0 Safari/537.36"
+)
+
+def _ensure_web_libs() -> None:
+    import urllib.request
+    lib = WEB / "lib"
+    lib.mkdir(exist_ok=True)
+    for name, urls in _LIB_ASSETS.items():
+        path = lib / name
+        if path.exists():
+            continue
+        for url in urls:
+            try:
+                log.info("Downloading %s …", name)
+                req = urllib.request.Request(url, headers={"User-Agent": _BROWSER_UA})
+                with urllib.request.urlopen(req, timeout=10) as r:
+                    path.write_bytes(r.read())
+                log.info("  ✓ %s", name)
+                break
+            except Exception as e:
+                log.warning("  ✗ %s from %s: %s", name, url, e)
+
+
+# ─────────────────────────────────────────────────────────────────────────────
 # Entry point
 # ─────────────────────────────────────────────────────────────────────────────
 def main() -> None:
@@ -568,13 +652,18 @@ def main() -> None:
     url = f"http://127.0.0.1:{args.port}"
     log.info("Server ready at %s", url)
 
+    # ── Download Leaflet/ant-path locally so pywebview doesn't need CDN ─────────
+    _ensure_web_libs()
+
     # ── Data source ────────────────────────────────────────────────────────────
+    global _is_demo
     if args.demo or not cfg.get("telegram", {}).get("api_id"):
+        _is_demo = True
         if not args.demo:
-            log.warning("No config.json found — running in DEMO mode")
-            log.warning("Run with --setup to configure real Telegram data")
+            log.warning("No config.json — DEMO mode  (run --setup for real data)")
         threading.Thread(target=_run_demo, daemon=True, name="demo").start()
     else:
+        _is_demo = False
         threading.Thread(
             target=_run_telegram, args=(cfg,), daemon=True, name="telegram"
         ).start()
@@ -584,8 +673,12 @@ def main() -> None:
         try:
             import webview
             log.info("Opening desktop window")
-            webview.create_window("Ukraine Drone Map", url=url, width=1440, height=900, resizable=True)
-            webview.start()
+            webview.create_window(
+                "Ukraine Drone Map", url=url,
+                width=1440, height=900, resizable=True,
+                background_color="#080c10",
+            )
+            webview.start(private_mode=False)
             return
         except ImportError:
             pass

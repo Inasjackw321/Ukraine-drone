@@ -3,13 +3,36 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width,initial-scale=1">
+  <!-- Allow all external sources (required for pywebview) -->
+  <meta http-equiv="Content-Security-Policy"
+        content="default-src * 'unsafe-inline' 'unsafe-eval' data: blob:;">
   <title>Ukraine Drone Map</title>
-  <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css">
-  <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
-  <script src="https://unpkg.com/leaflet-ant-path@1.3.0/dist/leaflet-ant-path.js"></script>
+
+  <!-- Leaflet — local copy first (downloaded on first run), CDN fallback -->
+  <link rel="stylesheet" href="/static/lib/leaflet.css"
+        onerror="this.onerror=null;this.href='https://unpkg.com/leaflet@1.9.4/dist/leaflet.css'">
+  <script>
+    function loadScript(local, cdn) {
+      var s = document.createElement('script');
+      s.src = local;
+      s.onerror = function() { var f = document.createElement('script'); f.src = cdn; document.head.appendChild(f); };
+      document.head.appendChild(s);
+    }
+  </script>
+  <script src="/static/lib/leaflet.js"
+          onerror="loadScript('','https://unpkg.com/leaflet@1.9.4/dist/leaflet.js')"></script>
+  <script src="/static/lib/ant-path.js"
+          onerror="loadScript('','https://unpkg.com/leaflet-ant-path@1.3.0/dist/leaflet-ant-path.js')"></script>
+
   <link rel="stylesheet" href="/static/style.css">
 </head>
 <body>
+
+<!-- Demo mode banner — hidden by default, shown via JS when server reports demo -->
+<div id="demo-banner">
+  ⚠ DEMO MODE — showing sample data.
+  Run <code>python app.py --setup</code> then restart to connect live Telegram channels.
+</div>
 
 <aside id="panel">
   <header>

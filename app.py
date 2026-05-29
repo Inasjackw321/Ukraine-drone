@@ -373,7 +373,27 @@ async def _telegram_loop(cfg: dict) -> None:
         int(tg["api_id"]),
         tg["api_hash"],
     )
-    await client.start(phone=tg.get("phone", ""))
+
+    phone = tg.get("phone", "")
+
+    async def _code_cb() -> str:
+        loop = asyncio.get_running_loop()
+        return await loop.run_in_executor(
+            None,
+            lambda: _ask(
+                "Telegram Login",
+                f"Enter the verification code sent to {phone}\n(you can paste it here)",
+            )
+        )
+
+    async def _pw_cb() -> str:
+        loop = asyncio.get_running_loop()
+        return await loop.run_in_executor(
+            None,
+            lambda: _ask("Telegram 2FA", "Enter your Two-Factor Authentication password", password=True)
+        )
+
+    await client.start(phone=phone, code_callback=_code_cb, password=_pw_cb)
     log.info("Telegram authenticated")
 
     entities: dict[int, str] = {}
@@ -548,16 +568,59 @@ def _run_demo() -> None:
 
 
 # ─────────────────────────────────────────────────────────────────────────────
+# GUI helpers — use tkinter dialogs so the user can paste freely
+# ─────────────────────────────────────────────────────────────────────────────
+def _ask(title: str, prompt: str, password: bool = False) -> str:
+    """Show a tkinter input dialog; returns stripped text or raises SystemExit."""
+    try:
+        import tkinter as tk
+        from tkinter import simpledialog
+        root = tk.Tk()
+        root.withdraw()
+        root.lift()
+        root.attributes("-topmost", True)
+        val = simpledialog.askstring(title, prompt, parent=root, show="*" if password else None)
+        root.destroy()
+        if val is None:
+            raise SystemExit("Cancelled")
+        return val.strip()
+    except ImportError:
+        # tkinter not available — fall back to terminal
+        import getpass
+        if password:
+            return getpass.getpass(f"{prompt}: ").strip()
+        return input(f"{prompt}: ").strip()
+
+
+def _show_info(title: str, message: str) -> None:
+    try:
+        import tkinter as tk
+        from tkinter import messagebox
+        root = tk.Tk()
+        root.withdraw()
+        root.attributes("-topmost", True)
+        messagebox.showinfo(title, message, parent=root)
+        root.destroy()
+    except ImportError:
+        print(f"\n  [{title}] {message}\n")
+
+
+# ─────────────────────────────────────────────────────────────────────────────
 # Setup wizard
 # ─────────────────────────────────────────────────────────────────────────────
 def _run_setup() -> dict:
     print("\n" + "━" * 54)
     print("  Ukraine Drone Map — Telegram Setup")
     print("━" * 54)
-    print("\n  Get free API credentials at:  https://my.telegram.org/apps\n")
-    api_id   = input("  API ID (number): ").strip()
-    api_hash = input("  API Hash:        ").strip()
-    phone    = input("  Phone (+380…):   ").strip()
+    print("  Popup dialogs will appear — you can paste into them.\n")
+    _show_info(
+        "Telegram Setup",
+        "Get free API credentials at:\nhttps://my.telegram.org/apps\n\n"
+        "You will be asked for:\n  • API ID\n  • API Hash\n  • Phone number",
+    )
+    api_id   = _ask("Telegram Setup", "API ID (number from my.telegram.org/apps)")
+    api_hash = _ask("Telegram Setup", "API Hash (long hex string)")
+    phone    = _ask("Telegram Setup", "Phone number (e.g. +380XXXXXXXXX)")
     cfg = {
         "telegram": {"api_id": int(api_id), "api_hash": api_hash, "phone": phone},
         "channels": CHANNELS,
@@ -565,6 +628,7 @@ def _run_setup() -> dict:
     with open(CONFIG, "w") as f:
         json.dump(cfg, f, indent=2)
     print("\n  ✓ Saved to config.json\n")
+    _show_info("Setup Complete", "✓ Credentials saved to config.json\n\nRestart the app to connect.")
     return cfg
 
 

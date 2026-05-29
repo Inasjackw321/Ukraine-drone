@@ -17,6 +17,7 @@ const THREATS = {
   ballistic: { label: 'Ballistic', color: '#eab308', glow: '#ca8a04', speed: 1200, cat: 'missile' },
   missile:   { label: 'Missile',   color: '#ef4444', glow: '#dc2626', speed: 700,  cat: 'missile' },
   unknown:   { label: 'Unknown',   color: '#94a3b8', glow: '#64748b', speed: 300,  cat: 'unknown' },
+  aviation:  { label: 'Aviation',  color: '#38bdf8', glow: '#0ea5e9', speed: 800,  cat: 'aviation' },
 };
 
 const STATUS_CLASS = {
@@ -81,7 +82,9 @@ const SHAPES = {
   // ballistic / iskander: teardrop
   iskander:  'M8,1 C12,1 14,7 14,12 C14,15 11,16 8,16 C5,16 2,15 2,12 C2,7 4,1 8,1 Z',
   ballistic: 'M8,1 C12,1 14,7 14,12 C14,15 11,16 8,16 C5,16 2,15 2,12 C2,7 4,1 8,1 Z',
-  unknown: 'M8,2 L14,14 L8,11 L2,14 Z',
+  unknown:  'M8,2 L14,14 L8,11 L2,14 Z',
+  // top-down aircraft silhouette
+  aviation: 'M8,0 L10,5 L16,6 L16,8 L10,8 L11,16 L8,14 L5,16 L6,8 L0,8 L0,6 L6,5 Z',
 };
 
 const RING_COLORS = {

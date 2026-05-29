@@ -184,6 +184,10 @@ THREAT_RE: list[tuple[re.Pattern, str]] = [
     (re.compile(r"балістич",           re.I),          "ballistic"),
     (re.compile(r"ракет",              re.I),          "missile"),
     (re.compile(r"бпла|дрон",          re.I),          "drone"),
+    (re.compile(
+        r"літак|авіац|винищувач|штурмовик|бомбард|гелікоптер|"
+        r"f-16|су-\d+|міг-\d+|helicopter|aircraft|aviation",
+        re.I),                                          "aviation"),
 ]
 
 STATUS_RE = {

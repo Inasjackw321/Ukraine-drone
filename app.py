@@ -656,11 +656,17 @@ def main() -> None:
 if __name__ == "__main__":
     try:
         main()
-    except Exception as exc:
+    except Exception:
         import traceback
+        msg = traceback.format_exc()
+        # Write to a file so the error is readable even if the window closes
+        try:
+            (Path(__file__).parent / "error.log").write_text(msg)
+        except Exception:
+            pass
         print("\n" + "─" * 54)
-        print("  APP CRASHED")
+        print("  APP CRASHED — error also saved to error.log")
         print("─" * 54)
-        traceback.print_exc()
+        print(msg)
         print("─" * 54)
         input("\n  Press Enter to close…")

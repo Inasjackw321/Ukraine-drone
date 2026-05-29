@@ -699,10 +699,7 @@ _LIB_ASSETS = {
         "https://cdn.jsdelivr.net/npm/leaflet@1.9.4/dist/leaflet.js",
         "https://unpkg.com/leaflet@1.9.4/dist/leaflet.js",
     ],
-    "ant-path.js": [
-        "https://cdn.jsdelivr.net/npm/leaflet-ant-path@1.3.0/dist/leaflet-ant-path.js",
-        "https://unpkg.com/leaflet-ant-path@1.3.0/dist/leaflet-ant-path.js",
-    ],
+
 }
 
 def _ensure_web_libs() -> None:

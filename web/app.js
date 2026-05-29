@@ -164,9 +164,24 @@ function popup(evt) {
 }
 
 // ── Threat state ──────────────────────────────────────────────────────────
-const threats = new Map();  // id → { evt, marker, antPath, trails[], animFrame, cancelled }
-const seenIds = new Set();  // dedup across WS push + HTTP poll
+const threats = new Map();
+const seenIds = new Set();
 let totalCount = 0;
+
+// Build a racetrack patrol loop centred on (lat,lon) for aviation threats
+function _patrolRoute(lat, lon) {
+  const w = 1.4, h = 0.35;   // ~155 km wide, ~40 km tall
+  return [
+    [lat + h,  lon - w],
+    [lat,      lon - w * 0.5],
+    [lat - h,  lon],
+    [lat,      lon + w * 0.5],
+    [lat + h,  lon + w],
+    [lat,      lon + w * 0.5],
+    [lat - h,  lon],
+    [lat,      lon - w * 0.5],
+  ];
+}
 
 function addThreat(evt) {
   if (!evt.lat || !evt.lon) return;
@@ -175,14 +190,12 @@ function addThreat(evt) {
   const wps = (evt.waypoints || []).filter(w => w.lat && w.lon);
   const def  = THREATS[evt.type] || THREATS.unknown;
 
-  // Initial bearing: from second-to-last → last waypoint (or default north)
   let brg = 0;
   if (wps.length >= 2) {
     const a = wps[wps.length - 2], b = wps[wps.length - 1];
     brg = bearing(a.lat, a.lon, b.lat, b.lon);
   }
 
-  // Marker
   const marker = L.marker([evt.lat, evt.lon], {
     icon: makeIcon(evt.type, evt.status, brg),
     zIndexOffset: def.cat === 'missile' ? 1000 : 500,
@@ -190,48 +203,38 @@ function addThreat(evt) {
   marker.bindPopup(popup(evt), { maxWidth: 280 });
   marker.addTo(layers.markers);
 
-  // Ant-path trajectory (optional — skip if plugin not loaded)
-  let antPath = null;
+  // Trajectory trail (no ant-path dependency)
   const trailLines = [];
   if (wps.length >= 2) {
     const lls = wps.map(w => [w.lat, w.lon]);
-    if (L.polyline.antPath) {
-      try {
-        antPath = L.polyline.antPath(lls, {
-          delay: 600, dashArray: [8, 16], weight: 2,
-          color: def.color, pulseColor: '#fff',
-          hardwareAccelerated: true,
-        }).addTo(layers.paths);
-      } catch (_) {}
-    }
-
-    // Faint historical trail
     trailLines.push(L.polyline(lls, {
-      color: def.color, weight: 1.2, opacity: 0.18, dashArray: '3 8',
-    }).addTo(layers.trails));
+      color: def.color, weight: 2, opacity: 0.55,
+      dashArray: '6 10',
+    }).addTo(layers.paths));
 
-    // Projected path ahead
     const vel = computeVelocity(wps, evt.type);
     const msLeft = EXPIRE_MS - (Date.now() - new Date(evt.ts).getTime());
+    const last = wps[wps.length - 1];
     const projEnd = {
-      lat: wps[wps.length-1].lat + vel.dLat * Math.max(msLeft, 10_000),
-      lon: wps[wps.length-1].lon + vel.dLon * Math.max(msLeft, 10_000),
+      lat: last.lat + vel.dLat * Math.max(msLeft, 10_000),
+      lon: last.lon + vel.dLon * Math.max(msLeft, 10_000),
     };
-    trailLines.push(L.polyline(
-      [[wps[wps.length-1].lat, wps[wps.length-1].lon], [projEnd.lat, projEnd.lon]],
-      { color: def.color, weight: 1, opacity: 0.10, dashArray: '2 12' }
-    ).addTo(layers.trails));
+    trailLines.push(L.polyline([[last.lat, last.lon], [projEnd.lat, projEnd.lon]], {
+      color: def.color, weight: 1, opacity: 0.18, dashArray: '2 14',
+    }).addTo(layers.trails));
   }
 
-  const obj = { evt, marker, antPath, trailLines, animFrame: null, cancelled: false };
+  const obj = { evt, marker, trailLines, animFrame: null, cancelled: false };
   threats.set(evt.id, obj);
 
-  // Animate
   if (evt.status !== 'destroyed') {
-    _animate(obj, wps);
+    if (evt.type === 'aviation') {
+      _animatePatrol(obj);
+    } else {
+      _animate(obj, wps);
+    }
   }
 
-  // Auto-expire
   const ttl = EXPIRE_MS - (Date.now() - new Date(evt.ts).getTime());
   setTimeout(() => removeThreat(evt.id), Math.max(ttl, 5000));
   updateStats();
@@ -243,10 +246,42 @@ function removeThreat(id) {
   obj.cancelled = true;
   if (obj.animFrame) cancelAnimationFrame(obj.animFrame);
   layers.markers.removeLayer(obj.marker);
-  if (obj.antPath) layers.paths.removeLayer(obj.antPath);
-  obj.trailLines.forEach(l => layers.trails.removeLayer(l));
+  obj.trailLines.forEach(l => {
+    layers.paths.removeLayer(l);
+    layers.trails.removeLayer(l);
+  });
   threats.delete(id);
   updateStats();
+}
+
+// ── Patrol animation (aviation — loops forever) ───────────────────────────
+function _animatePatrol(obj) {
+  const { evt, marker } = obj;
+  const route   = _patrolRoute(evt.lat, evt.lon);
+  const speedMs = (THREATS[evt.type] || THREATS.aviation).speed * DEG_PER_KM / 3_600_000;
+
+  function step(si, t0) {
+    if (obj.cancelled || !threats.has(evt.id)) return;
+    const fi   = si % route.length;
+    const ti   = (si + 1) % route.length;
+    const from = route[fi], to = route[ti];
+    const dist = Math.hypot(to[0] - from[0], to[1] - from[1]);
+    const segMs = dist / speedMs;
+    const t = Math.min((performance.now() - t0) / segMs, 1);
+
+    marker.setLatLng([
+      from[0] + (to[0] - from[0]) * t,
+      from[1] + (to[1] - from[1]) * t,
+    ]);
+    marker.setIcon(makeIcon(evt.type, evt.status, bearing(from[0], from[1], to[0], to[1])));
+
+    if (t >= 1) {
+      step(si + 1, performance.now());
+    } else {
+      obj.animFrame = requestAnimationFrame(() => step(si, t0));
+    }
+  }
+  step(0, performance.now());
 }
 
 // ── Animation ─────────────────────────────────────────────────────────────

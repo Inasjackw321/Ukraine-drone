@@ -250,8 +250,7 @@ from fastapi.staticfiles import StaticFiles
 _events: deque[dict] = deque(maxlen=500)
 _clients: set[WebSocket] = set()
 _loop: asyncio.AbstractEventLoop | None = None
-_stats    = {"total": 0, "channels": set()}
-_is_demo  = True   # set at startup; sent to frontend so it can show a banner
+_stats = {"total": 0, "channels": set()}
 
 
 @asynccontextmanager
@@ -295,8 +294,7 @@ def _get_events():
 
 @web_app.get("/api/stats")
 def _get_stats():
-    return {**_stats, "channels": list(_stats["channels"]), "clients": len(_clients),
-            "demo": _is_demo}
+    return {**_stats, "channels": list(_stats["channels"]), "clients": len(_clients)}
 
 
 # ── Tile proxy — serves map tiles through localhost so pywebview can load them
@@ -335,8 +333,6 @@ async def _ws(ws: WebSocket):
     await ws.accept()
     _clients.add(ws)
     try:
-        # Tell the frontend whether this is demo or live Telegram
-        await ws.send_text(json.dumps({"type": "mode", "demo": _is_demo}))
         await ws.send_text(json.dumps({"type": "history", "data": list(_events)[:80]}))
         while True:
             try:
@@ -450,121 +446,6 @@ def _run_telegram(cfg: dict) -> None:
     finally:
         loop.close()
 
-
-# ─────────────────────────────────────────────────────────────────────────────
-# Demo mode
-# ─────────────────────────────────────────────────────────────────────────────
-_DEMO = [
-    {
-        "type": "shahed", "status": "moving", "count": 6,
-        "channel": "War Monitor",
-        "location": "Харків",
-        "text": "🚨 6 Шахедів зафіксовано у Харківській обл. Рухаються з боку Росії у напрямку Харкова.",
-        "waypoints": [
-            {"lat": 50.60, "lon": 37.80, "name": "Бєлгород (RU)"},
-            {"lat": 50.30, "lon": 37.10, "name": "Куп'янськ"},
-            {"lat": 49.99, "lon": 36.23, "name": "Харків"},
-        ],
-        "from": "Росія", "to": "Харків",
-    },
-    {
-        "type": "kalibr", "status": "moving", "count": 2,
-        "channel": "КПСЗСУ",
-        "location": "Запоріжжя",
-        "text": "⚠️ Калібри над Херсонщиною, рухаються у напрямку Запоріжжя.",
-        "waypoints": [
-            {"lat": 45.50, "lon": 33.00, "name": "Крим"},
-            {"lat": 46.64, "lon": 32.62, "name": "Херсон"},
-            {"lat": 47.84, "lon": 35.14, "name": "Запоріжжя"},
-        ],
-        "from": "Крим", "to": "Запоріжжя",
-    },
-    {
-        "type": "drone", "status": "alert", "count": 4,
-        "channel": "Monitor UA",
-        "location": "Київ",
-        "text": "❗️ Повітряна тривога в Київській та Чернігівській обл. 4 БПЛА рухаються з боку Білорусі.",
-        "waypoints": [
-            {"lat": 52.40, "lon": 30.50, "name": "Білорусь"},
-            {"lat": 51.50, "lon": 31.29, "name": "Чернігів"},
-            {"lat": 50.45, "lon": 30.52, "name": "Київ"},
-        ],
-        "from": "Білорусь", "to": "Київ",
-    },
-    {
-        "type": "x101", "status": "moving", "count": 3,
-        "channel": "КПСЗСУ",
-        "location": "Вінниця",
-        "text": "🚀 Х-101 зафіксовані над Хмельниччиною, рухаються у напрямку Вінниці.",
-        "waypoints": [
-            {"lat": 52.00, "lon": 25.00, "name": "Білорусь"},
-            {"lat": 50.62, "lon": 26.25, "name": "Рівне"},
-            {"lat": 49.42, "lon": 26.99, "name": "Хмельницький"},
-            {"lat": 49.23, "lon": 28.47, "name": "Вінниця"},
-        ],
-        "from": "Білорусь", "to": "Захід",
-    },
-    {
-        "type": "kinzhal", "status": "launch", "count": 1,
-        "channel": "КПСЗСУ",
-        "location": "Київ",
-        "text": "🔴 Кинджал! Гіперзвукова ракета зафіксована. Тривога по всій країні.",
-        "waypoints": [
-            {"lat": 55.00, "lon": 37.00, "name": "Москва (RU)"},
-            {"lat": 53.50, "lon": 34.50, "name": "Брянськ (RU)"},
-            {"lat": 51.50, "lon": 31.29, "name": "Чернігів"},
-            {"lat": 50.45, "lon": 30.52, "name": "Київ"},
-        ],
-        "from": "Росія",
-    },
-    {
-        "type": "shahed", "status": "destroyed", "count": 3,
-        "channel": "War Monitor",
-        "location": "Одеса",
-        "text": "✅ Збито 3 Шахеди над Одеською обл. ППО відпрацювала.",
-        "waypoints": [
-            {"lat": 45.50, "lon": 31.50, "name": "Чорне море"},
-            {"lat": 46.48, "lon": 30.72, "name": "Одеса"},
-        ],
-        "from": "Чорне море",
-    },
-    {
-        "type": "iskander", "status": "moving", "count": 1,
-        "channel": "КПСЗСУ",
-        "location": "Дніпро",
-        "text": "⚡ Іскандер зафіксований. Рухається у напрямку Дніпра.",
-        "waypoints": [
-            {"lat": 47.50, "lon": 37.90, "name": "Донецьк (TOT)"},
-            {"lat": 48.02, "lon": 36.50, "name": "Запорізька"},
-            {"lat": 48.46, "lon": 35.05, "name": "Дніпро"},
-        ],
-        "from": "Схід", "to": "Дніпро",
-    },
-]
-
-
-def _run_demo() -> None:
-    import random
-    time.sleep(2)
-    log.info("Demo mode — injecting sample events")
-    i = 0
-    while True:
-        base = _DEMO[i % len(_DEMO)]
-        evt: dict = {
-            "id":       str(uuid.uuid4()),
-            "ts":       datetime.now(timezone.utc).isoformat(),
-            "msg_id":   0,
-            **base,
-        }
-        # Slight position jitter so same events don't overlap exactly
-        if evt.get("waypoints"):
-            last = evt["waypoints"][-1]
-            evt["lat"] = last["lat"] + random.uniform(-0.12, 0.12)
-            evt["lon"] = last["lon"] + random.uniform(-0.12, 0.12)
-        push_event(evt)
-        log.info("[demo] %-10s  %s", evt["type"], evt.get("location", ""))
-        i += 1
-        time.sleep(random.uniform(12, 25))
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -681,7 +562,6 @@ def _ensure_web_libs() -> None:
 # ─────────────────────────────────────────────────────────────────────────────
 def main() -> None:
     ap = argparse.ArgumentParser(description="Ukraine Drone Map")
-    ap.add_argument("--demo",    action="store_true", help="Force demo mode")
     ap.add_argument("--setup",   action="store_true", help="Configure Telegram")
     ap.add_argument("--browser", action="store_true", help="Open in browser only")
     ap.add_argument("--port",    type=int, default=8765)
@@ -694,13 +574,11 @@ def main() -> None:
     print()
 
     # ── Config ────────────────────────────────────────────────────────────────
-    if args.setup:
+    if args.setup or not CONFIG.exists():
         cfg = _run_setup()
-    elif CONFIG.exists():
+    else:
         with open(CONFIG) as f:
             cfg = json.load(f)
-    else:
-        cfg = {}
 
     # ── Server ────────────────────────────────────────────────────────────────
     import uvicorn
@@ -719,18 +597,10 @@ def main() -> None:
     # ── Download Leaflet/ant-path locally so pywebview doesn't need CDN ─────────
     _ensure_web_libs()
 
-    # ── Data source ────────────────────────────────────────────────────────────
-    global _is_demo
-    if args.demo or not cfg.get("telegram", {}).get("api_id"):
-        _is_demo = True
-        if not args.demo:
-            log.warning("No config.json — DEMO mode  (run --setup for real data)")
-        threading.Thread(target=_run_demo, daemon=True, name="demo").start()
-    else:
-        _is_demo = False
-        threading.Thread(
-            target=_run_telegram, args=(cfg,), daemon=True, name="telegram"
-        ).start()
+    # ── Start Telegram polling ─────────────────────────────────────────────────
+    threading.Thread(
+        target=_run_telegram, args=(cfg,), daemon=True, name="telegram"
+    ).start()
 
     # ── Open UI ────────────────────────────────────────────────────────────────
     if not args.browser:

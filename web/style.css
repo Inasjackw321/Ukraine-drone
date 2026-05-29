@@ -14,15 +14,6 @@
 
 html, body { height: 100%; overflow: hidden; font-family: 'Segoe UI', system-ui, sans-serif; background: var(--bg); color: var(--text); }
 
-/* ── Demo banner ─────────────────────────────────────────────────────────── */
-#demo-banner {
-  display: none;
-  position: fixed; top: 0; left: 320px; right: 0;
-  background: #92400e; color: #fef3c7;
-  font-size: 12px; padding: 6px 14px; z-index: 2000; text-align: center;
-}
-#demo-banner code { background: rgba(0,0,0,.3); padding: 1px 5px; border-radius: 3px; font-size: 11px; }
-
 /* ── Layout ──────────────────────────────────────────────────────────────── */
 #panel {
   position: fixed; top: 0; left: 0;

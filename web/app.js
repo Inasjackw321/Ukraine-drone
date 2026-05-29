@@ -408,9 +408,6 @@ function connect() {
       [...m.data].reverse().forEach(handleEvent);
     } else if (m.type === 'next_update') {
       nextUpdateAt = new Date(m.at).getTime();
-    } else if (m.type === 'mode') {
-      const banner = document.getElementById('demo-banner');
-      if (m.demo) banner.style.display = 'block';
     }
   };
 }

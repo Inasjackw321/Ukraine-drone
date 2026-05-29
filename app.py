@@ -321,6 +321,12 @@ def _get_stats():
     return {**_stats, "channels": list(_stats["channels"]), "clients": len(_clients)}
 
 
+_BROWSER_UA = (
+    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+    "AppleWebKit/537.36 (KHTML, like Gecko) "
+    "Chrome/124.0 Safari/537.36"
+)
+
 # ── Tile proxy — serves map tiles through localhost so pywebview can load them
 _tile_cache: dict[str, bytes] = {}
 
@@ -560,12 +566,6 @@ _LIB_ASSETS = {
         "https://unpkg.com/leaflet-ant-path@1.3.0/dist/leaflet-ant-path.js",
     ],
 }
-
-_BROWSER_UA = (
-    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
-    "AppleWebKit/537.36 (KHTML, like Gecko) "
-    "Chrome/124.0 Safari/537.36"
-)
 
 def _ensure_web_libs() -> None:
     import urllib.request

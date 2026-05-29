@@ -398,7 +398,7 @@ if WEB.exists():
 # Telegram polling  (10-minute cycle)
 # ─────────────────────────────────────────────────────────────────────────────
 CHANNELS  = ["kpszsu", "war_monitor", "mon1tor_ua", "eradar_ua"]
-POLL_SECS = 600  # 10 minutes
+POLL_SECS = 60  # 1 minute
 
 
 async def _telegram_loop(cfg: dict) -> None:

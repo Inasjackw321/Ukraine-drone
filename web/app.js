@@ -196,10 +196,17 @@ function addThreat(evt) {
     brg = bearing(a.lat, a.lon, b.lat, b.lon);
   }
 
-  const marker = L.marker([evt.lat, evt.lon], {
-    icon: makeIcon(evt.type, evt.status, brg),
-    zIndexOffset: def.cat === 'missile' ? 1000 : 500,
-  });
+  let marker;
+  try {
+    marker = L.marker([evt.lat, evt.lon], {
+      icon: makeIcon(evt.type, evt.status, brg),
+      zIndexOffset: def.cat === 'missile' ? 1000 : 500,
+    });
+  } catch(e) {
+    marker = L.circleMarker([evt.lat, evt.lon], {
+      radius: 10, color: def.color, fillColor: def.color, fillOpacity: 0.85,
+    });
+  }
   marker.bindPopup(popup(evt), { maxWidth: 280 });
   marker.addTo(layers.markers);
 
@@ -471,17 +478,34 @@ function setConn(state) {
   txt.textContent = { connecting: 'Connecting…', live: 'Connected', error: 'Reconnecting…' }[state];
 }
 
-// ── HTTP polling — reliable fallback if WebSocket push fails ─────────────
-// Polls /api/events every 5 s and merges any events not yet seen via WS.
-async function pollEvents() {
-  try {
-    const r = await fetch('/api/events');
-    if (r.ok) {
-      const { events } = await r.json();
-      (events || []).forEach(handleEvent);
+// ── HTTP polling — XMLHttpRequest instead of fetch() for pywebview compat ──
+function pollEvents() {
+  const xhr = new XMLHttpRequest();
+  xhr.onreadystatechange = function() {
+    if (xhr.readyState !== 4) return;
+    if (xhr.status === 200) {
+      try {
+        const data = JSON.parse(xhr.responseText);
+        const evts = data.events || [];
+        if (evts.length > 0) {
+          document.getElementById('conn-txt').textContent = 'Live · ' + evts.length + ' event' + (evts.length === 1 ? '' : 's');
+          document.getElementById('conn-dot').className = 'dot live';
+        }
+        evts.forEach(handleEvent);
+      } catch(e) {
+        document.getElementById('conn-txt').textContent = 'Parse error';
+      }
+    } else if (xhr.status !== 0) {
+      document.getElementById('conn-txt').textContent = 'Poll error ' + xhr.status;
     }
-  } catch (_) {}
-  setTimeout(pollEvents, 5000);
+    setTimeout(pollEvents, 3000);
+  };
+  xhr.onerror = function() {
+    document.getElementById('conn-txt').textContent = 'XHR error – retrying';
+    setTimeout(pollEvents, 3000);
+  };
+  xhr.open('GET', window.location.origin + '/api/events', true);
+  xhr.send();
 }
 
 // ── Boot ──────────────────────────────────────────────────────────────────

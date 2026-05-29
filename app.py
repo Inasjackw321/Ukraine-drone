@@ -1,9 +1,9 @@
 #!/usr/bin/env python3
 """
 Ukraine Drone Map
-Run:  python app.py           (uses config.json if present, otherwise demo)
-      python app.py --demo    (always demo mode)
-      python app.py --setup   (configure Telegram credentials)
+Run:  python app.py           (prompts for credentials on first run)
+      python app.py --setup   (re-run credential setup)
+      python app.py --browser (open in browser instead of desktop window)
 """
 
 import argparse
@@ -388,21 +388,13 @@ async def _telegram_loop(cfg: dict) -> None:
     phone = tg.get("phone", "")
 
     async def _code_cb() -> str:
-        loop = asyncio.get_running_loop()
-        return await loop.run_in_executor(
-            None,
-            lambda: _ask(
-                "Telegram Login",
-                f"Enter the verification code sent to {phone}\n(you can paste it here)",
-            )
-        )
+        # Must use terminal input here — tkinter can't be called safely from threads
+        print(f"\n  [Telegram] Check your phone ({phone}) for a verification code.")
+        return input("  Code: ").strip()
 
     async def _pw_cb() -> str:
-        loop = asyncio.get_running_loop()
-        return await loop.run_in_executor(
-            None,
-            lambda: _ask("Telegram 2FA", "Enter your Two-Factor Authentication password", password=True)
-        )
+        import getpass
+        return getpass.getpass("  [Telegram] 2FA password: ").strip()
 
     await client.start(phone=phone, code_callback=_code_cb, password=_pw_cb)
     log.info("Telegram authenticated")
@@ -523,8 +515,7 @@ def _run_setup() -> dict:
     }
     with open(CONFIG, "w") as f:
         json.dump(cfg, f, indent=2)
-    print("\n  ✓ Saved to config.json\n")
-    _show_info("Setup Complete", "✓ Credentials saved to config.json\n\nRestart the app to connect.")
+    print("\n  ✓ Saved to config.json — starting app now…\n")
     return cfg
 
 
@@ -609,13 +600,9 @@ def main() -> None:
     url = f"http://127.0.0.1:{args.port}"
     log.info("Server ready at %s", url)
 
-    # ── Download Leaflet/ant-path locally so pywebview doesn't need CDN ─────────
-    _ensure_web_libs()
-
-    # ── Start Telegram polling ─────────────────────────────────────────────────
-    threading.Thread(
-        target=_run_telegram, args=(cfg,), daemon=True, name="telegram"
-    ).start()
+    # ── Background: download Leaflet libs + start Telegram ────────────────────
+    threading.Thread(target=_ensure_web_libs, daemon=True, name="libs").start()
+    threading.Thread(target=_run_telegram, args=(cfg,), daemon=True, name="telegram").start()
 
     # ── Open UI ────────────────────────────────────────────────────────────────
     if not args.browser:
@@ -629,12 +616,13 @@ def main() -> None:
             )
             webview.start(private_mode=False)
             return
-        except ImportError:
-            pass
+        except Exception as e:
+            if not isinstance(e, ImportError):
+                log.warning("pywebview failed (%s) — falling back to browser", e)
 
     import webbrowser
     webbrowser.open(url)
-    log.info("Opened in browser — Ctrl+C to quit")
+    log.info("Opened in browser — press Ctrl+C to quit")
     try:
         while True:
             time.sleep(1)

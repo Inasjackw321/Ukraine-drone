@@ -3027,13 +3027,19 @@ def find_locations(text: str) -> list[dict]:
                 covered.append((s, e))
                 results.append({"name": m.group(1), "lat": LOCS[candidate][0], "lon": LOCS[candidate][1]})
 
-    # ── Pass 1: exact match ───────────────────────────────────────────────────
+    # ── Pass 1: exact match (word-boundary guarded) ───────────────────────────
     for key in _LOCS_SORTED:
         i = tl.find(key)
         if i == -1:
             continue
         end = i + len(key)
+        # Skip if already covered by a longer match
         if any(s <= i and end <= e for s, e in covered):
+            continue
+        # Word boundary: don't match inside a larger word (e.g. "manne" in "unmanned")
+        if i > 0 and (tl[i - 1].isalpha() or tl[i - 1] == '-'):
+            continue
+        if end < len(tl) and (tl[end].isalpha() or tl[end] == '-'):
             continue
         covered.append((i, end))
         results.append({"name": text[i:end], "lat": LOCS[key][0], "lon": LOCS[key][1]})

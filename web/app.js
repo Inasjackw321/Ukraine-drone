@@ -29,6 +29,9 @@ const STATUS_CLASS = {
 
 // 1 degree latitude ≈ 111 km — used to convert km/h to deg/ms
 const DEG_PER_KM = 1 / 111;
+// Visual speed multiplier — drones/missiles move faster on screen than real-world
+// so the user can see movement within seconds of an update
+const ANIM_SPEED = 5;
 
 // Per-category expiry times
 function _expireMs(type) {
@@ -159,9 +162,7 @@ function popup(evt) {
       ${dirLabel     ? `<div style="color:#94a3b8;font-size:11px">🧭 Heading: <b style="color:#e2e8f0">${dirLabel}</b></div>` : ''}
       ${evt.from     ? `<div style="color:#94a3b8;font-size:11px">↗ From: ${evt.from}</div>` : ''}
       ${evt.to       ? `<div style="color:#94a3b8;font-size:11px">🎯 Toward: ${evt.to}</div>` : ''}
-      ${evt.waypoints && evt.waypoints.length > 1
-        ? `<div style="color:#64748b;font-size:10px;margin-top:3px">📌 ${evt.waypoints.map(w=>w.name).join(' → ')}</div>`
-        : ''}
+      ${evt.to ? `<div style="color:#64748b;font-size:10px;margin-top:3px">📍→ ${evt.to}</div>` : ''}
       <div style="margin-top:7px;padding-top:6px;border-top:1px solid #1a2332;
                   font-size:10px;color:#64748b;line-height:1.45">
         ${(evt.text || '').substring(0, 200)}${(evt.text||'').length > 200 ? '…' : ''}
@@ -228,7 +229,9 @@ function addThreat(evt) {
   if (!evt.lat || !evt.lon) return;
   if (threats.has(evt.id)) removeThreat(evt.id);
 
-  const wps  = (evt.waypoints || []).filter(w => w.lat && w.lon);
+  // Use only the origin waypoint — direction comes from to_lat/to_lon or cardinal bearing,
+  // not from the full list of all mentioned locations (which causes random diagonal animation)
+  const wps  = (evt.waypoints || []).slice(0, 1).filter(w => w.lat && w.lon);
   const def  = THREATS[evt.type] || THREATS.unknown;
   const count = Math.min(evt.count || 1, 6);
 
@@ -261,13 +264,6 @@ function addThreat(evt) {
     m.addTo(layers.markers);
     markers.push(m);
   });
-
-  // Waypoint trail only (no forward-projection line — it caused cross-Ukraine artifacts)
-  if (wps.length >= 2) {
-    trailLines.push(L.polyline(wps.map(w => [w.lat, w.lon]), {
-      color: def.color, weight: 2, opacity: 0.5, dashArray: '5 9',
-    }).addTo(layers.paths));
-  }
 
   // Faint forecast line from detection point toward named destination (max 3° ≈ 330 km)
   if (evt.to_lat && evt.to_lon) {
@@ -320,7 +316,7 @@ function _animatePatrol(obj) {
   const { evt } = obj;
   const marker = (obj.markers && obj.markers[0]) || obj.marker;
   const route   = _patrolRoute(evt.lat, evt.lon);
-  const speedMs = (THREATS[evt.type] || THREATS.aviation).speed * DEG_PER_KM / 3_600_000;
+  const speedMs = (THREATS[evt.type] || THREATS.aviation).speed * DEG_PER_KM / 3_600_000 * ANIM_SPEED;
 
   function step(si, t0) {
     if (obj.cancelled || !threats.has(evt.id)) return;
@@ -353,7 +349,7 @@ function _animatePatrol(obj) {
 // MAX_EXTRAP_MS only limits the initial position jump on startup load.
 function _animateMarker(obj, marker, wps, evt) {
   const def = THREATS[evt.type] || THREATS.unknown;
-  const speedDegMs = def.speed * DEG_PER_KM / 3_600_000;
+  const speedDegMs = def.speed * DEG_PER_KM / 3_600_000 * ANIM_SPEED;
 
   // When a named destination exists, always start from origin so movement is visible.
   // For position-only events, cap elapsed to MAX_EXTRAP_MS to avoid huge jumps on load.

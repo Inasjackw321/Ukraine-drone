@@ -480,10 +480,35 @@ CHANNEL_NAMES = {
     "eradar_ua":   "eRadar UA",
 }
 
+# ── Cardinal direction parsing ────────────────────────────────────────────────
+# Diagonal cardinals checked first (more specific than plain N/S/E/W).
+# These are TRAVEL direction (where the drone is going).
+_TRAVEL_DIR_RE: list[tuple[int, re.Pattern]] = [
+    (45,  re.compile(r"північно.?схід|north.?east|ne\s+course|northeast(?:ern)?\s+(?:course|direction)", re.I)),
+    (135, re.compile(r"південно.?схід|south.?east|se\s+course|southeast(?:ern)?\s+(?:course|direction)", re.I)),
+    (225, re.compile(r"південно.?захід|south.?west|sw\s+course|southwest(?:ern)?\s+(?:course|direction)", re.I)),
+    (315, re.compile(r"північно.?захід|north.?west|nw\s+course|northwest(?:ern)?\s+(?:course|direction)", re.I)),
+    (0,   re.compile(r"курсом\s+на\s+північ|north(?:ern)?\s+course|heading\s+north|на\s+північ", re.I)),
+    (90,  re.compile(r"курсом\s+на\s+схід|east(?:ern)?\s+course|heading\s+east|на\s+схід", re.I)),
+    (180, re.compile(r"курсом\s+на\s+південь|south(?:ern)?\s+course|heading\s+south|на\s+південь", re.I)),
+    (270, re.compile(r"курсом\s+на\s+захід|west(?:ern)?\s+course|heading\s+west|на\s+захід", re.I)),
+]
+# Origin direction — drone came FROM this direction, so travel = +180°
+_ORIGIN_DIR_RE: list[tuple[int, re.Pattern]] = [
+    (45,  re.compile(r"з\s+(?:боку\s+)?північного\s+сходу|from\s+the\s+north.?east", re.I)),
+    (135, re.compile(r"з\s+(?:боку\s+)?південного\s+сходу|from\s+the\s+south.?east", re.I)),
+    (225, re.compile(r"з\s+(?:боку\s+)?південного\s+заходу|from\s+the\s+south.?west", re.I)),
+    (315, re.compile(r"з\s+(?:боку\s+)?північного\s+заходу|from\s+the\s+north.?west", re.I)),
+    (90,  re.compile(r"зі?\s+сходу|з\s+(?:боку\s+)?сходу|from\s+the\s+east", re.I)),
+    (270, re.compile(r"зі?\s+заходу|з\s+(?:боку\s+)?заходу|from\s+the\s+west", re.I)),
+    (0,   re.compile(r"з\s+(?:боку\s+)?півночі|from\s+the\s+north", re.I)),
+    (180, re.compile(r"з\s+(?:боку\s+)?півдня|from\s+the\s+south", re.I)),
+]
+
 # Regex that splits combined multi-threat messages into individual segments.
-# Ukrainian reports chain events with ";" or start new segments with action emojis.
+# Splits on ";" or on whitespace + action emoji (leading emoji not split).
 _SEGMENT_SPLIT_RE = re.compile(
-    r';\s*|(?<!\A)(?:🚀|💥|⚡|✈️|🛩️|🔴|🟡|🟠|🔵|☠️|💣|🎯)\s*',
+    r';\s*|\s(?:🚀|💥|⚡|✈️|🛩️|🔴|🟡|🟠|🔵|☠️|💣|🎯)\s*',
 )
 
 
@@ -493,7 +518,7 @@ def split_segments(text: str) -> list[str]:
     return [p.strip() for p in parts if len(p.strip()) >= 12]
 
 
-def parse_message(text: str, channel: str, msg_id: int = 0) -> dict | None:
+def parse_message(text: str, channel: str, msg_id: int = 0, msg_date=None) -> dict | None:
     if not text or len(text) < 15:
         return None
 
@@ -525,14 +550,27 @@ def parse_message(text: str, channel: str, msg_id: int = 0) -> dict | None:
     else:
         count = 1
 
-    # Directions
+    # Directions (named from/to locations)
     frm = (FROM_RE.search(text) or type("", (), {"group": lambda s, i: None})()).group(1)
     to  = (TO_RE.search(text)   or type("", (), {"group": lambda s, i: None})()).group(1)
+
+    # Cardinal travel direction — checked travel keywords first, then origin (reversed)
+    direction_deg = None
+    for deg, pat in _TRAVEL_DIR_RE:
+        if pat.search(text):
+            direction_deg = deg
+            break
+    if direction_deg is None:
+        for deg, pat in _ORIGIN_DIR_RE:
+            if pat.search(text):
+                direction_deg = (deg + 180) % 360  # "from east" → going west
+                break
+
     primary = locs[0] if locs else None
 
     return {
         "id":        str(uuid.uuid4()),
-        "ts":        datetime.now(timezone.utc).isoformat(),
+        "ts":        (msg_date.isoformat() if msg_date else datetime.now(timezone.utc).isoformat()),
         "channel":   CHANNEL_NAMES.get(channel, channel),
         "msg_id":    msg_id,
         "text":      text[:400],
@@ -541,6 +579,7 @@ def parse_message(text: str, channel: str, msg_id: int = 0) -> dict | None:
         "count":     count,
         "from":      frm,
         "to":        to,
+        "direction": direction_deg,
         "lat":       primary["lat"] if primary else None,
         "lon":       primary["lon"] if primary else None,
         "location":  primary["name"] if primary else None,
@@ -768,7 +807,7 @@ async def _telegram_loop(cfg: dict) -> None:
                 raw = msg.message or ""
                 segments = split_segments(raw) or [raw]
                 for i, seg in enumerate(segments):
-                    evt = parse_message(seg, slug, msg.id)
+                    evt = parse_message(seg, slug, msg.id, msg_date=msg_date)
                     if evt:
                         evt["id"] = f"{msg.id}_{i}"  # stable, unique per segment
                         log.info("[%s] %-10s  %s", slug, evt["type"], evt.get("location", "?"))

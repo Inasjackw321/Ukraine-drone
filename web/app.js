@@ -29,9 +29,6 @@ const STATUS_CLASS = {
 // 1 degree latitude ≈ 111 km — used to convert km/h to deg/ms
 const DEG_PER_KM = 1 / 111;
 
-// Animation: time to traverse all known waypoints before extrapolating
-const WAYPOINT_TRAVERSE_MS = 22_000;  // 22 seconds
-
 // Threat expires after this long (disappears from map)
 const EXPIRE_MS = 30 * 60 * 1000;
 
@@ -192,8 +189,9 @@ function addThreat(evt) {
   const wps = (evt.waypoints || []).filter(w => w.lat && w.lon);
   const def  = THREATS[evt.type] || THREATS.unknown;
 
-  let brg = 0;
-  if (wps.length >= 2) {
+  // Prefer cardinal direction parsed from text; fall back to last waypoint bearing
+  let brg = evt.direction != null ? evt.direction : 0;
+  if (brg === 0 && wps.length >= 2) {
     const a = wps[wps.length - 2], b = wps[wps.length - 1];
     brg = bearing(a.lat, a.lon, b.lat, b.lon);
   }
@@ -221,7 +219,15 @@ function addThreat(evt) {
       dashArray: '6 10',
     }).addTo(layers.paths));
 
-    const vel = computeVelocity(wps, evt.type);
+    // Projection line: use evt.direction if available, else derive from waypoints
+    let vel;
+    if (evt.direction != null) {
+      const rad = evt.direction * Math.PI / 180;
+      const speedDegMs = def.speed * DEG_PER_KM / 3_600_000;
+      vel = { dLat: Math.cos(rad) * speedDegMs, dLon: Math.sin(rad) * speedDegMs };
+    } else {
+      vel = computeVelocity(wps, evt.type);
+    }
     const msLeft = EXPIRE_MS - (Date.now() - new Date(evt.ts).getTime());
     const last = wps[wps.length - 1];
     const projEnd = {
@@ -294,53 +300,89 @@ function _animatePatrol(obj) {
 }
 
 // ── Animation ─────────────────────────────────────────────────────────────
+// Starts from the threat's real-world position based on elapsed time since
+// the message was sent, then extrapolates forward at physics speed.
 function _animate(obj, wps) {
-  if (wps.length < 2) return;
-
   const { evt, marker } = obj;
-  const segs      = wps.length - 1;
-  const segMs     = WAYPOINT_TRAVERSE_MS / segs;
-  const vel       = computeVelocity(wps, evt.type);
+  const def = THREATS[evt.type] || THREATS.unknown;
+  const speedDegMs = def.speed * DEG_PER_KM / 3_600_000;
 
-  // Phase 1: traverse waypoints
-  function animSeg(si, t0) {
-    if (obj.cancelled || !threats.has(evt.id)) return;
-    const from = wps[si], to = wps[si + 1];
-    const t    = Math.min((performance.now() - t0) / segMs, 1);
-    const ease = t < .5 ? 2*t*t : -1 + (4 - 2*t)*t;
+  // Time since Telegram message was sent
+  const elapsedMs = Math.max(0, Date.now() - new Date(evt.ts).getTime());
 
-    const lat = from.lat + (to.lat - from.lat) * ease;
-    const lon = from.lon + (to.lon - from.lon) * ease;
-    marker.setLatLng([lat, lon]);
+  // Cardinal direction parsed from message text (0-359°), or null
+  const cardinalBrg = evt.direction != null ? evt.direction : null;
 
-    // Update icon bearing at segment boundaries
-    const brg = bearing(from.lat, from.lon, to.lat, to.lon);
-    if (t >= 0.98) marker.setIcon(makeIcon(evt.type, evt.status, brg));
-
-    if (t < 1) {
-      obj.animFrame = requestAnimationFrame(() => animSeg(si, t0));
-    } else if (si < segs - 1) {
-      animSeg(si + 1, performance.now());
-    } else {
-      // Phase 2: extrapolate at real weapon speed
-      const finalBrg = bearing(wps[segs-1].lat, wps[segs-1].lon, wps[segs].lat, wps[segs].lon);
-      marker.setIcon(makeIcon(evt.type, evt.status, finalBrg));
-      _extrapolate(obj, wps[segs], vel);
-    }
+  // Velocity vector for extrapolation: prefer text direction, else waypoints
+  let extrapVel;
+  if (cardinalBrg != null) {
+    const rad = cardinalBrg * Math.PI / 180;
+    extrapVel = { dLat: Math.cos(rad) * speedDegMs, dLon: Math.sin(rad) * speedDegMs };
+  } else if (wps.length >= 2) {
+    extrapVel = computeVelocity(wps, evt.type);
+  } else {
+    extrapVel = { dLat: 0, dLon: 0 };
   }
 
-  animSeg(0, performance.now());
+  // Walk waypoints at real physics speed to find where the threat is now
+  let curLat, curLon, curBrg;
+  if (wps.length >= 2) {
+    let distLeft = speedDegMs * elapsedMs;
+    curLat = wps[0].lat; curLon = wps[0].lon;
+    curBrg = bearing(wps[0].lat, wps[0].lon, wps[1].lat, wps[1].lon);
+    let pastEnd = true;
+
+    for (let i = 0; i < wps.length - 1; i++) {
+      const a = wps[i], b = wps[i + 1];
+      const segDist = Math.hypot(b.lat - a.lat, b.lon - a.lon);
+      curBrg = bearing(a.lat, a.lon, b.lat, b.lon);
+      if (distLeft <= segDist) {
+        const t = distLeft / segDist;
+        curLat = a.lat + (b.lat - a.lat) * t;
+        curLon = a.lon + (b.lon - a.lon) * t;
+        distLeft = 0; pastEnd = false; break;
+      }
+      distLeft -= segDist;
+      curLat = b.lat; curLon = b.lon;
+    }
+
+    // Beyond last waypoint: extrapolate using direction vector
+    if (pastEnd && distLeft > 0) {
+      const extraMs = distLeft / speedDegMs;
+      curLat += extrapVel.dLat * extraMs;
+      curLon += extrapVel.dLon * extraMs;
+    }
+  } else {
+    // Single location: extrapolate from origin
+    const origin = wps[0] || { lat: evt.lat, lon: evt.lon };
+    curLat = origin.lat + extrapVel.dLat * elapsedMs;
+    curLon = origin.lon + extrapVel.dLon * elapsedMs;
+    curBrg = cardinalBrg != null ? cardinalBrg : 0;
+  }
+
+  // Text-parsed direction always wins for icon pointing
+  if (cardinalBrg != null) curBrg = cardinalBrg;
+
+  marker.setLatLng([curLat, curLon]);
+  marker.setIcon(makeIcon(evt.type, evt.status, curBrg));
+
+  // Continue moving forward in real-time at physics speed
+  if (extrapVel.dLat !== 0 || extrapVel.dLon !== 0) {
+    _extrapolate(obj, { lat: curLat, lon: curLon }, extrapVel, curBrg);
+  }
 }
 
-// Phase 2: continue in same direction at physics speed indefinitely
-function _extrapolate(obj, origin, vel) {
+// Continues motion from current position at constant physics-speed velocity
+function _extrapolate(obj, origin, vel, brg) {
   if (obj.cancelled || !threats.has(obj.evt.id)) return;
+  const { evt, marker } = obj;
   const t0 = performance.now();
 
   function step() {
     if (obj.cancelled || !threats.has(obj.evt.id)) return;
-    const el  = performance.now() - t0;
-    obj.marker.setLatLng([origin.lat + vel.dLat * el, origin.lon + vel.dLon * el]);
+    const el = performance.now() - t0;
+    marker.setLatLng([origin.lat + vel.dLat * el, origin.lon + vel.dLon * el]);
+    if (brg != null) marker.setIcon(makeIcon(evt.type, evt.status, brg));
     obj.animFrame = requestAnimationFrame(step);
   }
   step();

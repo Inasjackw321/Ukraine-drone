@@ -3160,8 +3160,23 @@ _AT_LEAST_RE = re.compile(
 )
 GROUP_RE = re.compile(
     r"груп[аиіою]|кількох|декількох|декілька|кілька|кільком|кількома"
-    r"|масован\w+|масштабн\w+|хвил[яі]|хвилею"
-    r"|group|several|multiple|swarm|wave|mass\s+(?:attack|launch|strike)",
+    r"|масован\w+|масштабн\w+"
+    r"|group|multiple|batch|salvo|series\s+of|number\s+of",
+    re.I,
+)
+_WAVE_RE = re.compile(
+    r"хвил[яі]|хвилею|хвиль|наліт|налітом"
+    r"|wave|waves|swarm|mass\s+(?:attack|launch|strike)|massive\s+(?:attack|strike|launch)",
+    re.I,
+)
+_PAIR_RE = re.compile(
+    r"\bпара\b|\bпари\b|\bпарою\b|\bдва\b|\bдві\b|\bпару\b"
+    r"|\bpair\b|\bpaired\b|\bduo\b|\btwo\b",
+    re.I,
+)
+_SEVERAL_RE = re.compile(
+    r"кілька|декілька|кількох|кільком"
+    r"|several|few|some|handful",
     re.I,
 )
 # Bare plural noun with no preceding number — implies ≥2
@@ -3376,10 +3391,16 @@ def parse_message(text: str, channel: str, msg_id: int = 0, msg_date=None, raw_t
     elif ma:
         n = ma.group(1) or ma.group(2)
         count = int(n) + 1 if ma.group(1) else int(n)
+    elif _WAVE_RE.search(combined):
+        count = _det_count(text[:40], 8, 16)   # wave / swarm → 8-16
     elif GROUP_RE.search(combined):
-        count = _det_count(text[:40], 4, 8)
+        count = _det_count(text[:40], 4, 10)   # group / multiple → 4-10
+    elif _SEVERAL_RE.search(combined):
+        count = _det_count(text[:40], 3, 5)    # several / few → 3-5
+    elif _PAIR_RE.search(combined):
+        count = 2                               # pair / duo → always 2
     elif _PLURAL_RE.search(combined):
-        count = _det_count(text[:40], 2, 4)
+        count = _det_count(text[:40], 2, 4)    # bare plural → 2-4
     else:
         count = 1
 

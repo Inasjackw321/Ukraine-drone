@@ -3519,7 +3519,7 @@ async def _tile_dark(z: int, x: int, y: int):
                     headers={"Cache-Control": "max-age=86400", "Access-Control-Allow-Origin": "*"})
 
 
-def _recent_events(max_age_seconds: int = 1800) -> list[dict]:
+def _recent_events(max_age_seconds: int = 7200) -> list[dict]:
     """Return events younger than max_age_seconds (default 30 min)."""
     cutoff = datetime.now(timezone.utc) - timedelta(seconds=max_age_seconds)
     out = []
@@ -3680,7 +3680,7 @@ async def _telegram_loop(cfg: dict) -> None:
         return any_plotted
 
     # ── 1. Initial history load (last 20 minutes) ─────────────────────────────
-    cutoff = datetime.now(timezone.utc) - timedelta(seconds=1200)
+    cutoff = datetime.now(timezone.utc) - timedelta(hours=2)
     seen_startup: set[int] = set()  # track IDs already pushed during startup
 
     for slug, ent in entity_objs.items():

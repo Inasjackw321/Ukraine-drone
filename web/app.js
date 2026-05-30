@@ -197,17 +197,30 @@ function _patrolRoute(lat, lon) {
   ];
 }
 
-// Arrange N markers in a line perpendicular to direction of travel
-function _formationOffsets(count, bearingDeg) {
+// Deterministic hash from a string — used to seed per-event RNG so the
+// scatter pattern is stable across re-renders of the same event
+function _hashStr(s) {
+  let h = 0x811c9dc5;
+  for (let i = 0; i < s.length; i++) { h ^= s.charCodeAt(i); h = (h * 0x01000193) >>> 0; }
+  return h;
+}
+
+// Scatter N markers randomly over a circular area. Positions are seeded by
+// the event ID so the same event always produces the same scatter pattern.
+function _formationOffsets(count, bearingDeg, seed) {
   if (count <= 1) return [[0, 0]];
-  // Tighter spacing for large formations so they don't span the whole screen
-  const SPACING = count <= 4 ? 0.050 : count <= 8 ? 0.035 : 0.025;
-  const perpRad = (bearingDeg + 90) * Math.PI / 180;
-  const half = (count - 1) / 2;
-  const offsets = [];
-  for (let i = 0; i < count; i++) {
-    const t = i - half;
-    offsets.push([Math.sin(perpRad) * SPACING * t, Math.cos(perpRad) * SPACING * t]);
+  // Radius scales slightly with count but stays compact (~5-12 km)
+  const R = Math.min(0.045 + count * 0.004, 0.12);
+  let rng = (seed || 0) >>> 0;
+  function rand() {
+    rng = (Math.imul(rng, 1664525) + 1013904223) >>> 0;
+    return rng / 0x100000000;
+  }
+  const offsets = [[0, 0]];  // one marker always at the reported position
+  for (let i = 1; i < count; i++) {
+    const angle = rand() * 2 * Math.PI;
+    const r     = Math.sqrt(rand()) * R;  // sqrt for uniform disk distribution
+    offsets.push([Math.sin(angle) * r, Math.cos(angle) * r]);
   }
   return offsets;
 }
@@ -243,7 +256,7 @@ function addThreat(evt) {
     brg = bearing(a.lat, a.lon, b.lat, b.lon);
   }
 
-  const offsets = _formationOffsets(count, brg);
+  const offsets = _formationOffsets(count, brg, _hashStr(String(evt.id || '')));
   const baseOff = _overlapOffset(evt.lat, evt.lon, brg);
   const markers = [];
   const trailLines = [];
@@ -451,16 +464,16 @@ function _extrapolateMarker(obj, marker, origin, vel, brg, evt) {
 
 // ── Stats ─────────────────────────────────────────────────────────────────
 function updateStats() {
-  let active = 0, destroyed = 0;
+  let active = 0;
   for (const [, o] of threats) {
-    if (o.evt.status === 'destroyed') destroyed++;
-    else active++;
+    if (o.evt.status !== 'destroyed') {
+      // Count each individual marker icon, not just each event
+      active += (o.markers && o.markers.length) ? o.markers.length : 1;
+    }
   }
   const cTotal = document.getElementById('c-total');
   if (cTotal) cTotal.textContent = totalCount;
   document.getElementById('c-active').textContent = active;
-  const cDest = document.getElementById('c-destroyed');
-  if (cDest) cDest.textContent = destroyed;
   const nt = document.getElementById('no-threats');
   if (nt) nt.style.display = threats.size === 0 ? 'flex' : 'none';
 }

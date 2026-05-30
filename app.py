@@ -10,9 +10,17 @@ Run:  python app.py           (prompts for credentials on first run)
 import subprocess, os as _os
 try:
     _repo = _os.path.dirname(_os.path.abspath(__file__))
-    subprocess.run(["git", "-C", _repo, "pull"], capture_output=True, timeout=15)
-except Exception:
-    pass
+    _r = subprocess.run(
+        ["git", "-C", _repo, "pull", "origin", "main"],
+        capture_output=True, timeout=20, text=True
+    )
+    if _r.returncode == 0 and "Already up to date" not in _r.stdout:
+        print(f"[auto-update] {_r.stdout.strip()}")
+        # Re-exec so updated code takes effect immediately
+        import sys as _sys
+        _os.execv(_sys.executable, [_sys.executable] + _sys.argv)
+except Exception as _e:
+    print(f"[auto-update] skipped: {_e}")
 
 import argparse
 import asyncio

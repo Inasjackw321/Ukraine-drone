@@ -207,13 +207,13 @@ function _patrolRoute(lat, lon) {
 // Arrange N markers in a line perpendicular to direction of travel
 function _formationOffsets(count, bearingDeg) {
   if (count <= 1) return [[0, 0]];
-  const SPACING = 0.45;  // ~50 km gap between units — clearly separate at zoom 6
-  const perpRad = (bearingDeg + 90) * Math.PI / 180;
+  const SPACING = 0.28;  // ~31 km gap between units — balanced for zoom 6-8
+  const brRad = bearingDeg * Math.PI / 180;
   const half = (count - 1) / 2;
   const offsets = [];
   for (let i = 0; i < count; i++) {
     const t = i - half;
-    offsets.push([Math.sin(perpRad) * SPACING * t, Math.cos(perpRad) * SPACING * t]);
+    offsets.push([-Math.sin(brRad) * SPACING * t, Math.cos(brRad) * SPACING * t]);
   }
   return offsets;
 }
@@ -227,8 +227,8 @@ function addThreat(evt) {
   const count = Math.min(evt.count || 1, 12);
 
   // Initial bearing from text direction, or last waypoint segment
-  let brg = evt.direction != null ? evt.direction : 0;
-  if (brg === 0 && wps.length >= 2) {
+  let brg = evt.direction != null ? evt.direction : 180;
+  if (brg === 180 && wps.length >= 2) {
     const a = wps[wps.length - 2], b = wps[wps.length - 1];
     brg = bearing(a.lat, a.lon, b.lat, b.lon);
   }

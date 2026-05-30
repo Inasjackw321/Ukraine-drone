@@ -983,7 +983,8 @@ TO_RE = re.compile(
     re.I,
 )
 COUNT_RE = re.compile(
-    r"(\d+)\s*(?:шахед|бпла|бпл|ракет|дрон|калібр|кинджал|каб|фаб|uav|uavs|drone|drones|missile|missiles|kar|kab|fab)",
+    r"(\d+)\s*(?:ворожих\s+|атакуючих\s+|enemy\s+|hostile\s+)?"
+    r"(?:шахед|бпла|бпл|ракет|дрон|калібр|кинджал|каб|фаб|uav|uavs|drone|drones|missile|missiles|kar|kab|fab)",
     re.I,
 )
 # Range like "4-6 drones" or "від 4 до 6" — take upper bound
@@ -998,14 +999,19 @@ _AT_LEAST_RE = re.compile(
     re.I,
 )
 GROUP_RE = re.compile(
-    r"груп[аиі]|кількох|декількох|декілька|кілька|кільком|group|several|multiple|swarm",
+    r"груп[аиіою]|кількох|декількох|декілька|кілька|кільком|кількома"
+    r"|масован\w+|масштабн\w+|хвил[яі]|хвилею"
+    r"|group|several|multiple|swarm|wave|mass\s+(?:attack|launch|strike)",
     re.I,
 )
 # Bare plural noun with no preceding number — implies at least 2
 _PLURAL_RE = re.compile(
     r"\b(?:uavs|drones|missiles|rockets|shaheds|geraniums|"
-    r"бпла(?:ми|х|ів)|дрони|дронів|дронами|ракети|ракет(?:ами|ах)|"
-    r"шахеди|шахедів|шахедами|літаки|гелікоптери)\b",
+    r"бпла(?:ми|х|ів)|бпла-[а-яa-z]+(?:ів|и)?"
+    r"|ударних\s+бпла|атакуючих\s+бпла|барражуючих\s+бпла"
+    r"|дрони|дронів|дронами|ракети|ракетами|ракетах"
+    r"|шахеди|шахедів|шахедами|крилаті\s+ракети"
+    r"|літаки|гелікоптери|об'єкти|targets)\b",
     re.I,
 )
 
@@ -1147,6 +1153,13 @@ _OBLAST_HINT_RE = re.compile(
 )
 
 
+def _det_count(seed: str, lo: int, hi: int) -> int:
+    """Deterministic count in [lo,hi] based on message text — stable across restarts."""
+    import hashlib
+    h = int(hashlib.md5(seed.encode('utf-8', errors='replace')).hexdigest(), 16)
+    return lo + (h % (hi - lo + 1))
+
+
 def parse_message(text: str, channel: str, msg_id: int = 0, msg_date=None, raw_text: str = "") -> dict | None:
     if not text or len(text) < 10:
         return None
@@ -1203,9 +1216,9 @@ def parse_message(text: str, channel: str, msg_id: int = 0, msg_date=None, raw_t
         n = ma.group(1) or ma.group(2)
         count = int(n) + 1 if ma.group(1) else int(n)    # "more than 5" → 6, "5+" → 5
     elif GROUP_RE.search(combined):
-        count = random.randint(4, 8)                      # group/swarm/several = 4–8
+        count = _det_count(text[:40], 4, 8)               # group/swarm/several = 4–8
     elif _PLURAL_RE.search(combined):
-        count = random.randint(2, 4)                      # plain plural = 2–4
+        count = _det_count(text[:40], 2, 4)               # plain plural = 2–4
     else:
         count = 1
 

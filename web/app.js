@@ -22,11 +22,6 @@ const THREATS = {
   aviation:  { label: 'Aviation',   color: '#38bdf8', glow: '#0ea5e9', speed: 800,  cat: 'aviation'   },
 };
 
-const STATUS_CLASS = {
-  moving: 's-moving', destroyed: 's-destroyed',
-  alert:  's-alert',  launch:    's-launch', unknown: 's-unknown',
-};
-
 // 1 degree latitude ≈ 111 km — used to convert km/h to deg/ms
 const DEG_PER_KM = 1 / 111;
 
@@ -454,7 +449,6 @@ function updateStats() {
     if (o.evt.status === 'destroyed') destroyed++;
     else active++;
   }
-  document.getElementById('c-total').textContent     = totalCount;
   document.getElementById('c-active').textContent    = active;
   document.getElementById('c-destroyed').textContent = destroyed;
   const nt = document.getElementById('no-threats');
@@ -474,86 +468,13 @@ setInterval(() => {
   }
 }, 30_000);
 
-// ── Feed ──────────────────────────────────────────────────────────────────
-function addFeedItem(evt) {
-  const def  = THREATS[evt.type] || THREATS.unknown;
-  const time = new Date(evt.ts).toLocaleTimeString('en-US', { hour:'2-digit', minute:'2-digit' });
-  const sCls = STATUS_CLASS[evt.status] || 's-unknown';
-
-  const el = document.createElement('div');
-  el.className  = 'item';
-  el.dataset.cat    = def.cat;
-  el.dataset.status = evt.status || 'unknown';
-
-  el.innerHTML = `
-    <div class="item-top">
-      <span class="item-icon">
-        <svg width="14" height="14" viewBox="0 0 16 16">
-          <path d="${SHAPES[evt.type] || SHAPES.unknown}" fill="${def.color}"/>
-        </svg>
-      </span>
-      <span class="item-type" style="color:${def.color}">${def.label} × ${evt.count||1}</span>
-      <span class="badge ${sCls}">${evt.status||'?'}</span>
-      <span class="item-time">${time}</span>
-    </div>
-    ${evt.location ? `<div class="item-loc">📍 ${evt.location}</div>` : ''}
-    <div class="item-text">${evt.text || ''}</div>
-    <div class="item-ch">${evt.channel || ''}</div>`;
-
-  el.addEventListener('click', () => {
-    if (evt.lat && evt.lon) map.setView([evt.lat, evt.lon], 9, { animate: true });
-    const o = threats.get(evt.id);
-    if (o) o.marker.openPopup();
-  });
-
-  applyFilter(el);
-  const feed = document.getElementById('feed');
-  feed.insertBefore(el, feed.firstChild);
-  while (feed.children.length > 150) feed.removeChild(feed.lastChild);
-}
-
-// ── Filters ───────────────────────────────────────────────────────────────
-let activeFilter = 'all';
-
-document.querySelectorAll('.f').forEach(b => {
-  b.addEventListener('click', () => {
-    document.querySelectorAll('.f').forEach(x => x.classList.remove('active'));
-    b.classList.add('active');
-    activeFilter = b.dataset.f;
-    document.querySelectorAll('.item').forEach(applyFilter);
-  });
-});
-
-function applyFilter(el) {
-  const show = activeFilter === 'all'
-    || activeFilter === el.dataset.cat
-    || activeFilter === el.dataset.status;
-  el.classList.toggle('hidden', !show);
-}
-
-// ── Update status display ─────────────────────────────────────────────────
-function _setUpdateTxt(text) {
-  const el = document.getElementById('update-txt');
-  if (el) el.textContent = text;
-}
-
-// ── CSS pulse animation injection ────────────────────────────────────────
-document.head.insertAdjacentHTML('beforeend', `
-  <style>
-    @keyframes iconPulse {
-      0%,100%{opacity:1;filter:drop-shadow(0 0 4px currentColor)}
-      50%{opacity:.65;filter:drop-shadow(0 0 10px currentColor)}
-    }
-  </style>`);
-
 // ── WebSocket ─────────────────────────────────────────────────────────────
 let ws, wsRetries = 0;
 
 function connect() {
-  const url = `${location.protocol==='https:'?'wss':'ws'}://${location.host}/ws`;
+  const url = `${location.protocol === 'https:' ? 'wss' : 'ws'}://${location.host}/ws`;
   setConn('connecting');
   ws = new WebSocket(url);
-
   ws.onopen  = () => { wsRetries = 0; setConn('live'); };
   ws.onclose = () => {
     setConn('error');
@@ -561,112 +482,47 @@ function connect() {
     wsRetries++;
   };
   ws.onerror = () => ws.close();
-
   ws.onmessage = ({ data }) => {
     let m;
     try { m = JSON.parse(data); } catch { return; }
-    if (m.type === 'event') {
-      handleEvent(m.data);
-    } else if (m.type === 'history') {
-      [...m.data].reverse().forEach(handleEvent);
-    } else if (m.type === 'next_update') {
-      _setUpdateTxt(m.at === 'live' ? 'Live — instant updates' : 'Loading history…');
-    }
+    if (m.type === 'event')        handleEvent(m.data);
+    else if (m.type === 'history') [...m.data].reverse().forEach(handleEvent);
   };
 }
 
 function handleEvent(evt) {
   if (!evt || !evt.id || hasSeen(evt.id)) return;
   markSeen(evt.id);
-  totalCount++;
   try { addThreat(evt); } catch(e) { console.error('addThreat', e, evt); }
-  try { addFeedItem(evt); } catch(e) { console.error('addFeedItem', e, evt); }
   updateStats();
 }
 
 function setConn(state) {
   const dot = document.getElementById('conn-dot');
   const txt = document.getElementById('conn-txt');
-  dot.className = `dot${state === 'live' ? ' live' : state === 'error' ? ' error' : ''}`;
-  txt.textContent = { connecting: 'Connecting…', live: 'Connected', error: 'Reconnecting…' }[state];
+  if (!dot || !txt) return;
+  dot.className  = `dot${state === 'live' ? ' live' : state === 'error' ? ' error' : ''}`;
+  txt.textContent = { connecting: 'Connecting…', live: 'Live', error: 'Reconnecting…' }[state];
 }
 
-// ── HTTP polling — XMLHttpRequest instead of fetch() for pywebview compat ──
+// ── HTTP polling — XMLHttpRequest for pywebview compatibility ─────────────
 function pollEvents() {
   const xhr = new XMLHttpRequest();
   xhr.onreadystatechange = function() {
     if (xhr.readyState !== 4) return;
     if (xhr.status === 200) {
-      try {
-        const data = JSON.parse(xhr.responseText);
-        const evts = data.events || [];
-        if (evts.length > 0) {
-          document.getElementById('conn-txt').textContent = 'Live · ' + evts.length + ' event' + (evts.length === 1 ? '' : 's');
-          document.getElementById('conn-dot').className = 'dot live';
-        }
-        evts.forEach(handleEvent);
-      } catch(e) {
-        document.getElementById('conn-txt').textContent = 'Parse error';
-      }
-    } else if (xhr.status !== 0) {
-      document.getElementById('conn-txt').textContent = 'Poll error ' + xhr.status;
+      try { (JSON.parse(xhr.responseText).events || []).forEach(handleEvent); } catch(e) {}
     }
     setTimeout(pollEvents, 3000);
   };
-  xhr.onerror = function() {
-    document.getElementById('conn-txt').textContent = 'XHR error – retrying';
-    setTimeout(pollEvents, 3000);
-  };
+  xhr.onerror = () => setTimeout(pollEvents, 3000);
   xhr.open('GET', window.location.origin + '/api/events', true);
-  xhr.send();
-}
-
-// ── RAW message feed tab ──────────────────────────────────────────────────
-let rawTab = false;
-
-document.querySelectorAll('.tab-btn').forEach(btn => {
-  btn.addEventListener('click', () => {
-    document.querySelectorAll('.tab-btn').forEach(b => b.classList.remove('active'));
-    btn.classList.add('active');
-    rawTab = btn.dataset.tab === 'raw';
-    document.getElementById('feed').style.display    = rawTab ? 'none' : '';
-    document.getElementById('feed-raw').style.display = rawTab ? '' : 'none';
-  });
-});
-
-function pollRawMessages() {
-  const xhr = new XMLHttpRequest();
-  xhr.onreadystatechange = function() {
-    if (xhr.readyState !== 4 || xhr.status !== 200) return;
-    try {
-      const msgs = JSON.parse(xhr.responseText).messages || [];
-      const el = document.getElementById('feed-raw');
-      if (!el) return;
-      el.innerHTML = '';
-      msgs.forEach(msg => {
-        const time = new Date(msg.ts).toLocaleTimeString('en-US',
-          { hour: '2-digit', minute: '2-digit', hour12: false });
-        const div = document.createElement('div');
-        div.className = 'raw-item ' + (msg.plotted ? 'r-plotted' : 'r-unplotted');
-        div.innerHTML = `<div class="raw-header">
-          <span class="raw-ch">${msg.channel}</span>
-          <span class="raw-time">${time}</span>
-          ${msg.plotted ? '<span class="raw-badge">PLOTTED</span>' : ''}
-        </div>
-        <div class="raw-text">${(msg.text || '').substring(0, 300)}</div>`;
-        el.appendChild(div);
-      });
-    } catch(e) {}
-  };
-  xhr.open('GET', window.location.origin + '/api/messages', true);
   xhr.send();
 }
 
 // ── Boot ──────────────────────────────────────────────────────────────────
 connect();
 pollEvents();
-pollRawMessages();
-setInterval(pollRawMessages, 30_000);
 setInterval(() => {
   const now = Date.now();
   for (const [id, o] of threats)

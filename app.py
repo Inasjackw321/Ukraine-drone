@@ -27,11 +27,12 @@ from pathlib import Path
 def _check_deps() -> None:
     import importlib.util as _ilu
     required = {
-        "fastapi":   "pip install fastapi",
-        "uvicorn":   "pip install uvicorn[standard]",
-        "telethon":  "pip install telethon",
-        "aiofiles":  "pip install aiofiles",
-        "websockets":"pip install websockets",
+        "fastapi":        "pip install fastapi",
+        "uvicorn":        "pip install uvicorn[standard]",
+        "telethon":       "pip install telethon",
+        "aiofiles":       "pip install aiofiles",
+        "websockets":     "pip install websockets",
+        "deep_translator":"pip install deep-translator",
     }
     missing = [f"  {pkg:12s}  →  {cmd}" for pkg, cmd in required.items()
                if _ilu.find_spec(pkg) is None]
@@ -58,6 +59,35 @@ log = logging.getLogger("ukraine-drone")
 HERE   = Path(__file__).parent
 WEB    = HERE / "web"
 CONFIG = HERE / "config.json"
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Translation — every message is translated to English before display/parsing
+# ─────────────────────────────────────────────────────────────────────────────
+_trans_cache: dict[str, str] = {}
+
+async def _translate(text: str) -> str:
+    """Translate text to English using Google Translate. Cached, never raises."""
+    if not text or len(text.strip()) < 4:
+        return text
+    # Fast path: mostly ASCII letters → already English
+    alpha = [c for c in text if c.isalpha()]
+    if alpha and sum(c.isascii() for c in alpha) / len(alpha) > 0.85:
+        return text
+    key = text[:500]
+    if key in _trans_cache:
+        return _trans_cache[key]
+    try:
+        from deep_translator import GoogleTranslator
+        result = await asyncio.to_thread(
+            GoogleTranslator(source="auto", target="en").translate,
+            text[:4999],
+        )
+        out = result or text
+    except Exception as exc:
+        log.debug("Translation skipped: %s", exc)
+        out = text
+    _trans_cache[key] = out
+    return out
 
 # ─────────────────────────────────────────────────────────────────────────────
 # Ukrainian Locations  (lat, lon)
@@ -940,8 +970,8 @@ async def _telegram_loop(cfg: dict) -> None:
             log.warning("  can't resolve @%s — %s", slug, e)
 
     # ── shared processing logic ───────────────────────────────────────────────
-    def _process_msg(msg, slug: str, *, is_history: bool = False) -> bool:
-        """Parse one Telethon message and push events. Returns True if plotted."""
+    async def _process_msg(msg, slug: str, *, is_history: bool = False) -> bool:
+        """Translate, parse, and push events for one Telethon message."""
         if not msg.date:
             return False
         msg_date = msg.date if msg.date.tzinfo else msg.date.replace(tzinfo=timezone.utc)
@@ -950,15 +980,18 @@ async def _telegram_loop(cfg: dict) -> None:
         if not raw.strip():
             return False
 
+        # Translate to English — used for both display and NLP parsing
+        text = await _translate(raw)
+
         raw_entry: dict = {
             "ts":      msg_date.isoformat(),
             "channel": CHANNEL_NAMES.get(slug, slug),
-            "text":    raw[:400],
+            "text":    text[:400],
             "plotted": False,
         }
         _raw_messages.appendleft(raw_entry)
 
-        segments = split_segments(raw) or [raw]
+        segments = split_segments(text) or [text]
         any_plotted = False
         for i, seg in enumerate(segments):
             evt = parse_message(seg, slug, msg.id, msg_date=msg_date)
@@ -983,8 +1016,27 @@ async def _telegram_loop(cfg: dict) -> None:
                     log.info("[%s] %-10s  %s", slug, sub["type"], wp["name"])
                     push_event(sub)
                     any_plotted = True
+
         if any_plotted:
             raw_entry["plotted"] = True
+        else:
+            # No location found — still push to live feed (no map marker)
+            fallback: dict = {
+                "id":       f"{msg.id}_text",
+                "ts":       msg_date.isoformat(),
+                "channel":  CHANNEL_NAMES.get(slug, slug),
+                "msg_id":   msg.id,
+                "text":     text[:400],
+                "type":     "unknown",
+                "status":   "alert",
+                "count":    1,
+                "lat":      None,
+                "lon":      None,
+                "location": None,
+                "waypoints": [],
+            }
+            push_event(fallback)
+            log.debug("[%s] text-only: %.60s", slug, text.replace("\n", " "))
         return any_plotted
 
     # ── 1. Initial history load (last 20 minutes) ─────────────────────────────
@@ -1005,7 +1057,7 @@ async def _telegram_loop(cfg: dict) -> None:
             if msg_date < cutoff:
                 continue
             seen_startup.add(msg.id)
-            _process_msg(msg, slug, is_history=True)
+            await _process_msg(msg, slug, is_history=True)
 
     log.info("History load complete — switching to real-time event mode")
 
@@ -1024,7 +1076,7 @@ async def _telegram_loop(cfg: dict) -> None:
         if msg.id in seen_startup:
             return
         log.info("[%s] live message #%d", slug, msg.id)
-        _process_msg(msg, slug)
+        await _process_msg(msg, slug)
 
     # ── 3. Keep the connection alive indefinitely ─────────────────────────────
     await client.run_until_disconnected()

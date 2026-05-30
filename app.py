@@ -758,6 +758,11 @@ def parse_message(text: str, channel: str, msg_id: int = 0, msg_date=None) -> di
             threat = name
             break
 
+    # Generic air-alert with no weapon ID — goes to feed only, not the map
+    if threat == "unknown":
+        log.debug("[%s] GENERIC ALERT (no weapon ID): %.80s", channel, text.replace("\n", " "))
+        return None
+
     locs = find_locations(text)
 
     # Fallback: if LOCS matching found nothing, try oblast-level hint
@@ -795,6 +800,17 @@ def parse_message(text: str, channel: str, msg_id: int = 0, msg_date=None) -> di
     frm = (FROM_RE.search(text) or type("", (), {"group": lambda s, i: None})()).group(1)
     to  = (TO_RE.search(text)   or type("", (), {"group": lambda s, i: None})()).group(1)
 
+    # Resolve destination coordinates for animation heading
+    to_lat, to_lon = None, None
+    if to:
+        to_key = to.lower().strip()
+        if to_key in LOCS:
+            to_lat, to_lon = LOCS[to_key]
+        else:
+            hm2 = _OBLAST_HINT_RE.search(to_key)
+            if hm2:
+                to_lat, to_lon = OBLAST_HINTS[hm2.group().lower()]
+
     # Cardinal travel direction — checked travel keywords first, then origin (reversed)
     direction_deg = None
     for deg, pat in _TRAVEL_DIR_RE:
@@ -820,6 +836,8 @@ def parse_message(text: str, channel: str, msg_id: int = 0, msg_date=None) -> di
         "count":     count,
         "from":      frm,
         "to":        to,
+        "to_lat":    to_lat,
+        "to_lon":    to_lon,
         "direction": direction_deg,
         "lat":       primary["lat"] if primary else None,
         "lon":       primary["lon"] if primary else None,

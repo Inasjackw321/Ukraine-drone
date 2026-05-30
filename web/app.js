@@ -35,7 +35,7 @@ const EXPIRE_MS = 30 * 60 * 1000;
 // How far back in time to extrapolate position on initial load.
 // Matches the 20-min history window so a drone reported 20 min ago
 // appears at its current estimated position, not its original reported spot.
-const MAX_EXTRAP_MS = 20 * 60 * 1000;
+const MAX_EXTRAP_MS = 5 * 60 * 1000;
 
 // ── Map ───────────────────────────────────────────────────────────────────
 const map = L.map('map', {
@@ -69,25 +69,25 @@ const layers = {
 // The outer ring color shows status; the inner fill shows threat type.
 
 const SHAPES = {
-  // drones: swept-wing delta shape
-  drone:     'M8,1 L15,13 L11,11 L8,14 L5,11 L1,13 Z',
-  shahed:    'M8,1 L15,13 L11,11 L8,14 L5,11 L1,13 Z',
-  geran:     'M8,1 L15,13 L11,11 L8,14 L5,11 L1,13 Z',
-  kar:       'M8,1 L15,13 L11,11 L8,14 L5,11 L1,13 Z',
-  // cruise missiles: slim sleek dart with notched tail
-  missile:   'M8,0 L12,12 L10,11 L8,15 L6,11 L4,12 Z',
-  kalibr:    'M8,0 L12,12 L10,11 L8,15 L6,11 L4,12 Z',
-  x101:      'M8,0 L12,12 L10,11 L8,15 L6,11 L4,12 Z',
-  x59:       'M8,0 L12,12 L10,11 L8,15 L6,11 L4,12 Z',
-  x22:       'M8,0 L12,12 L10,11 L8,15 L6,11 L4,12 Z',
-  oniks:     'M8,0 L12,12 L10,11 L8,15 L6,11 L4,12 Z',
-  // kinzhal: ultra-slim needle with double notch
-  kinzhal:   'M8,0 L10,14 L8,11 L6,14 Z',
-  // ballistic / iskander: rounded warhead silhouette
-  iskander:  'M8,1 C11,1 13,5 13,10 C13,14 11,15 8,15 C5,15 3,14 3,10 C3,5 5,1 8,1 Z',
-  ballistic: 'M8,1 C11,1 13,5 13,10 C13,14 11,15 8,15 C5,15 3,14 3,10 C3,5 5,1 8,1 Z',
-  // glide bomb: swept diamond — short broad wing
-  glidebomb: 'M8,2 L15,7 L12,8 L8,15 L4,8 L1,7 Z',
+  // drones: wide delta wing from above (Shahed / loitering munition top view)
+  drone:     'M8,1 L16,9 L13,12 L8,8 L3,12 L0,9 Z',
+  shahed:    'M8,1 L16,9 L13,12 L8,8 L3,12 L0,9 Z',
+  geran:     'M8,1 L16,9 L13,12 L8,8 L3,12 L0,9 Z',
+  kar:       'M8,1 L16,9 L13,12 L8,8 L3,12 L0,9 Z',
+  // cruise missiles: slim elongated dart with small rear fins
+  missile:   'M8,0 L10,14 L9,12 L8,16 L7,12 L6,14 Z',
+  kalibr:    'M8,0 L10,14 L9,12 L8,16 L7,12 L6,14 Z',
+  x101:      'M8,0 L10,14 L9,12 L8,16 L7,12 L6,14 Z',
+  x59:       'M8,0 L10,14 L9,12 L8,16 L7,12 L6,14 Z',
+  x22:       'M8,0 L10,14 L9,12 L8,16 L7,12 L6,14 Z',
+  oniks:     'M8,0 L10,14 L9,12 L8,16 L7,12 L6,14 Z',
+  // kinzhal: ultra-slim hypersonic needle
+  kinzhal:   'M8,0 L9.5,13 L8,11 L6.5,13 Z',
+  // ballistic / iskander: rounded warhead cone
+  iskander:  'M8,1 C12,1 14,6 14,11 C14,15 11,16 8,16 C5,16 2,15 2,11 C2,6 4,1 8,1 Z',
+  ballistic: 'M8,1 C12,1 14,6 14,11 C14,15 11,16 8,16 C5,16 2,15 2,11 C2,6 4,1 8,1 Z',
+  // glide bomb: wide swept wing viewed from above
+  glidebomb: 'M8,1 L16,7 L13,9 L8,15 L3,9 L0,7 Z',
   unknown:   'M8,2 L14,13 L8,10 L2,13 Z',
   // top-down aircraft silhouette
   aviation:  'M8,0 L10,5 L16,6 L16,8 L10,8 L11,16 L8,14 L5,16 L6,8 L0,8 L0,6 L6,5 Z',
@@ -104,38 +104,23 @@ function makeIcon(type, status, bearingDeg, count) {
   const ring  = RING_COLORS[status] || RING_COLORS.unknown;
   const isActive = status === 'moving' || status === 'launch' || status === 'alert';
   const pulse = isActive ? 'style="animation:iconPulse 1.8s infinite"' : '';
-  const size  = type === 'kinzhal' ? 50 : (def.cat === 'glidebomb' ? 54 : def.cat === 'missile' ? 46 : 54);
+  const size  = def.cat === 'missile' ? 44 : def.cat === 'glidebomb' ? 50 : 50;
   const n = count > 1 ? count : 0;
-  const uid = Math.random().toString(36).slice(2, 7);
+  const dashArr = status === 'destroyed' ? '3 2' : 'none';
 
-  // Lighter tint of the fill color for the gradient highlight
-  const svg = `
-    <svg width="${size}" height="${size}" viewBox="0 0 20 22"
-         style="transform:rotate(${bearingDeg}deg)" ${pulse}>
-      <defs>
-        <radialGradient id="g${uid}" cx="40%" cy="30%" r="65%">
-          <stop offset="0%"   stop-color="#ffffff" stop-opacity="0.35"/>
-          <stop offset="100%" stop-color="${def.color}" stop-opacity="0"/>
-        </radialGradient>
-        <filter id="f${uid}" x="-40%" y="-40%" width="180%" height="180%">
-          <feGaussianBlur in="SourceGraphic" stdDeviation="1.8" result="blur"/>
-          <feColorMatrix in="blur" type="matrix"
-            values="1 0 0 0 0  0 1 0 0 0  0 0 1 0 0  0 0 0 14 -5" result="glow"/>
-          <feMerge><feMergeNode in="glow"/><feMergeNode in="SourceGraphic"/></feMerge>
-        </filter>
-      </defs>
-      <g transform="scale(1.25) translate(0,-1)" filter="url(#f${uid})">
-        <path d="${shape}" fill="${def.color}" opacity="0.95"
-              stroke="${def.glow}" stroke-width="0.4" stroke-opacity="0.6"/>
-        <path d="${shape}" fill="url(#g${uid})"/>
-        <circle cx="8" cy="8" r="7" fill="none" stroke="${ring}"
-                stroke-width="1.5" opacity="0.9"
-                stroke-dasharray="${status === 'destroyed' ? '3 2' : 'none'}"/>
-      </g>
-      ${n ? `<text x="10" y="21" text-anchor="middle" font-family="monospace"
-               font-size="5.5" font-weight="bold" fill="white"
-               stroke="#080c10" stroke-width="1">×${n}</text>` : ''}
-    </svg>`;
+  const svg = `<svg width="${size}" height="${size}" viewBox="0 0 20 22"
+    style="transform:rotate(${bearingDeg}deg);filter:drop-shadow(0 0 4px ${def.glow}99)" ${pulse}>
+    <g transform="scale(1.2) translate(0.3,-0.5)">
+      <path d="${shape}" fill="${def.color}" opacity="0.95"
+            stroke="${def.glow}" stroke-width="0.5" stroke-opacity="0.7"/>
+      <circle cx="8" cy="8" r="7" fill="none" stroke="${ring}"
+              stroke-width="1.6" opacity="0.9"
+              stroke-dasharray="${dashArr}"/>
+    </g>
+    ${n ? `<text x="10" y="21" text-anchor="middle" font-family="monospace"
+            font-size="5.5" font-weight="bold" fill="white"
+            stroke="#080c10" stroke-width="1">×${n}</text>` : ''}
+  </svg>`;
 
   return L.divIcon({
     html: svg,
@@ -375,6 +360,12 @@ function _animateMarker(obj, marker, wps, evt) {
   } else if (wps.length >= 2) {
     extrapVel  = computeVelocity(wps, evt.type);
     guessedBrg = null;  // will be set from waypoints below
+  } else if (evt.to_lat && evt.to_lon) {
+    // Aim toward the parsed destination location
+    const toBrg = bearing(evt.lat, evt.lon, evt.to_lat, evt.to_lon);
+    const rad = toBrg * Math.PI / 180;
+    extrapVel  = { dLat: Math.cos(rad) * speedDegMs, dLon: Math.sin(rad) * speedDegMs };
+    guessedBrg = toBrg;
   } else {
     // No direction known — default heading for Russian assets entering Ukraine:
     // most attacks come from north/east, so default bearing is south (180°)

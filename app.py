@@ -1471,7 +1471,7 @@ async def _telegram_loop(cfg: dict) -> None:
             waypoints = evt.get("waypoints", [])
             if len(waypoints) <= 1:
                 evt["id"] = f"{msg.id}_{i}_0"
-                log.info("[%s] %-10s  %s", slug, evt["type"], evt.get("location", "?"))
+                log.info("[%s] %-10s  ×%-2d  %s", slug, evt["type"], evt.get("count", 1), evt.get("location", "?"))
                 push_event(evt)
                 any_plotted = True
             else:
@@ -1484,7 +1484,7 @@ async def _telegram_loop(cfg: dict) -> None:
                         "location":  wp["name"],
                         "waypoints": [wp],
                     }
-                    log.info("[%s] %-10s  %s", slug, sub["type"], wp["name"])
+                    log.info("[%s] %-10s  ×%-2d  %s", slug, sub["type"], sub.get("count", 1), wp["name"])
                     push_event(sub)
                     any_plotted = True
 
@@ -1541,7 +1541,9 @@ async def _telegram_loop(cfg: dict) -> None:
     # ── 2. Real-time handler — fires instantly on every new message ───────────
     @client.on(events.NewMessage(chats=list(entities.keys())))
     async def _on_new(event):
-        slug = entities.get(event.chat_id, "unknown")
+        # Telethon channel IDs may be negative; try both signs
+        cid  = event.chat_id
+        slug = entities.get(cid) or entities.get(-cid) or entities.get(abs(cid)) or "unknown"
         msg  = event.message
         # Skip anything already ingested during startup load
         if msg.id in seen_startup:

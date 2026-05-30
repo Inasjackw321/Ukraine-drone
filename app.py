@@ -375,15 +375,45 @@ LOCS: dict[str, tuple[float, float]] = {
     "івано-франківській":(48.92, 24.71),  "івано-франківського":(48.92, 24.71),
     "чернівецькій":      (48.29, 25.94),  "чернівецького":     (48.29, 25.94),
 
-    # ── English region names (for English-language posts) ────────────────────
-    "zaporizhzhia region": (47.84, 35.14), "zaporizhia region": (47.84, 35.14),
-    "kharkiv region":    (49.99, 36.23),   "chernihiv region":  (51.50, 31.29),
-    "sumy region":       (50.91, 34.80),   "kyiv region":       (50.52, 30.87),
-    "donetsk region":    (48.02, 37.80),   "luhansk region":    (48.57, 39.31),
-    "dnipropetrovsk region": (48.46, 35.05), "kherson region":  (46.64, 32.62),
-    "mykolaiv region":   (46.98, 31.99),   "odesa region":      (46.48, 30.72),
-    "poltava region":    (49.59, 34.55),   "vinnytsia region":  (49.23, 28.47),
-    "zhytomyr region":   (50.25, 28.66),   "cherkasy region":   (49.44, 32.06),
+    # ── English region/oblast names (Google Translate uses both forms) ─────────
+    "zaporizhzhia region": (47.84, 35.14), "zaporizhia region":   (47.84, 35.14),
+    "zaporizhzhia oblast": (47.84, 35.14), "zaporizhia oblast":   (47.84, 35.14),
+    "kharkiv region":    (49.99, 36.23),   "kharkiv oblast":      (49.99, 36.23),
+    "chernihiv region":  (51.50, 31.29),   "chernihiv oblast":    (51.50, 31.29),
+    "sumy region":       (50.91, 34.80),   "sumy oblast":         (50.91, 34.80),
+    "kyiv region":       (50.52, 30.87),   "kyiv oblast":         (50.52, 30.87),
+    "donetsk region":    (48.02, 37.80),   "donetsk oblast":      (48.02, 37.80),
+    "luhansk region":    (48.57, 39.31),   "luhansk oblast":      (48.57, 39.31),
+    "dnipropetrovsk region": (48.46, 35.05), "dnipropetrovsk oblast": (48.46, 35.05),
+    "kherson region":    (46.64, 32.62),   "kherson oblast":      (46.64, 32.62),
+    "mykolaiv region":   (46.98, 31.99),   "mykolaiv oblast":     (46.98, 31.99),
+    "odesa region":      (46.48, 30.72),   "odesa oblast":        (46.48, 30.72),
+    "poltava region":    (49.59, 34.55),   "poltava oblast":      (49.59, 34.55),
+    "vinnytsia region":  (49.23, 28.47),   "vinnytsia oblast":    (49.23, 28.47),
+    "zhytomyr region":   (50.25, 28.66),   "zhytomyr oblast":     (50.25, 28.66),
+    "cherkasy region":   (49.44, 32.06),   "cherkasy oblast":     (49.44, 32.06),
+    "kirovograd region": (48.51, 32.26),   "kirovograd oblast":   (48.51, 32.26),
+    "kirovohrad region": (48.51, 32.26),   "kirovohrad oblast":   (48.51, 32.26),
+    "rivne region":      (50.62, 26.25),   "rivne oblast":        (50.62, 26.25),
+    "volyn region":      (50.75, 25.33),   "volyn oblast":        (50.75, 25.33),
+    "lviv region":       (49.84, 24.03),   "lviv oblast":         (49.84, 24.03),
+    "ternopil region":   (49.55, 25.59),   "ternopil oblast":     (49.55, 25.59),
+    "zakarpattia region":(48.62, 22.29),   "zakarpattia oblast":  (48.62, 22.29),
+    "chernivtsi region": (48.29, 25.94),   "chernivtsi oblast":   (48.29, 25.94),
+
+    # ── Small towns that appear in kpszsu/war_monitor reports ───────────────
+    "dikanka":           (49.7833, 34.4167), "диканька":        (49.7833, 34.4167),
+    "kotelva":           (50.0667, 34.7500), "котельва":        (50.0667, 34.7500),
+    "opishnia":          (49.9667, 34.6167), "опішня":          (49.9667, 34.6167),
+    "reshetylivka":      (49.5667, 34.0667), "решетилівка":     (49.5667, 34.0667),
+    "velyka bahachka":   (49.7333, 33.7167),
+    "hadiach":           (50.3667, 34.0000), "гадяч":           (50.3667, 34.0000),
+    "lokhvytsia":        (50.3667, 33.2667), "лохвиця":         (50.3667, 33.2667),
+    "lubny":             (50.0167, 32.9833), "лубни":           (50.0167, 32.9833),
+    "myrhorod":          (49.9667, 33.6000), "миргород":        (49.9667, 33.6000),
+    "kremenchuk":        (49.0667, 33.4167), "кременчук":       (49.0667, 33.4167),
+    "okhtyrka":          (50.3000, 34.9000), "охтирка":         (50.3000, 34.9000),
+    "trostianets":       (50.4833, 34.9667), "тростянець":      (50.4833, 34.9667),
 
     # ── English city transliterations ────────────────────────────────────────
     "ichnya":            (50.85, 32.40),   "bakhmut":           (48.60, 37.99),
@@ -2955,6 +2985,15 @@ _LOCS_SORTED = sorted(LOCS.keys(), key=len, reverse=True)
 # Cyrillic word pattern used in stem-matching pass
 _CYR_WORD_RE = re.compile(r'[а-яґєіїА-ЯҐЄІЇ]{5,}')
 
+# English preposition pattern — "over/near/passing by [City]"
+# Compiled once at module level (was previously inside find_locations, recompiled every call)
+_EN_PREP_RE = re.compile(
+    r"\b(?:over|in|near|above|around|at|toward|towards|from|hitting|"
+    r"struck|strikes|targeting|targets|spotted|detected|crossing|via|through|"
+    r"passing\s+(?:by|over|through)|spotted\s+over|detected\s+over|"
+    r"heading\s+(?:to(?:ward)?s?\s+)?)\s*([A-Z][a-zA-Z]+(?:[ \-][A-Z][a-zA-Z]+)*)",
+)
+
 
 def find_locations(text: str) -> list[dict]:
     """Return list of {name, lat, lon} found in text.
@@ -2969,15 +3008,7 @@ def find_locations(text: str) -> list[dict]:
     results: list[dict] = []
     covered: list[tuple[int, int]] = []
 
-    # ── Pass 0: English preposition pattern — "over/in/near [City]" ──────────
-    # Runs before exact match so that multi-word city names (e.g. "Bila Tserkva")
-    # get a chance to be found via capitalisation even if the full phrase isn't
-    # in LOCS directly.
-    _EN_PREP_RE = re.compile(
-        r"\b(?:over|in|near|above|around|at|toward|towards|from|hitting|"
-        r"struck|strikes|targeting|targets|spotted over|detected over|"
-        r"heading (?:to|toward|towards))\s+([A-Z][a-zA-Z]+(?:[ \-][A-Z][a-zA-Z]+)*)",
-    )
+    # ── Pass 0: English preposition pattern — "over/near/passing by [City]" ──
     for m in _EN_PREP_RE.finditer(text):
         candidate = m.group(1).lower()
         if candidate in LOCS:
@@ -3519,7 +3550,7 @@ async def _tile_dark(z: int, x: int, y: int):
                     headers={"Cache-Control": "max-age=86400", "Access-Control-Allow-Origin": "*"})
 
 
-def _recent_events(max_age_seconds: int = 7200) -> list[dict]:
+def _recent_events(max_age_seconds: int = 1800) -> list[dict]:
     """Return events younger than max_age_seconds (default 30 min)."""
     cutoff = datetime.now(timezone.utc) - timedelta(seconds=max_age_seconds)
     out = []
@@ -3621,8 +3652,6 @@ async def _telegram_loop(cfg: dict) -> None:
 
         # Translate to English — used for both display and NLP parsing
         text = await _translate(raw)
-        log.info("[%s] TEXT: %.100s", slug, text.replace("\n", " "))
-
         raw_entry: dict = {
             "ts":      msg_date.isoformat(),
             "channel": CHANNEL_NAMES.get(slug, slug),
@@ -3680,7 +3709,7 @@ async def _telegram_loop(cfg: dict) -> None:
         return any_plotted
 
     # ── 1. Initial history load (last 20 minutes) ─────────────────────────────
-    cutoff = datetime.now(timezone.utc) - timedelta(hours=2)
+    cutoff = datetime.now(timezone.utc) - timedelta(seconds=1200)
     seen_startup: set[int] = set()  # track IDs already pushed during startup
 
     for slug, ent in entity_objs.items():

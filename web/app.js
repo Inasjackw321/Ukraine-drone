@@ -30,6 +30,11 @@ const STATUS_CLASS = {
 // 1 degree latitude ≈ 111 km — used to convert km/h to deg/ms
 const DEG_PER_KM = 1 / 111;
 
+// Scale factor applied to all animation speeds.
+// Physical speeds are correct for initial position estimation;
+// this makes the on-screen drift visually subtle and realistic-feeling.
+const ANIM_SPEED_SCALE = 0.25;
+
 // Threat expires after this long (disappears from map)
 const EXPIRE_MS = 30 * 60 * 1000;
 // Cap how far back in time we extrapolate position on load (avoids huge jumps)
@@ -163,9 +168,9 @@ function computeVelocity(waypoints, type) {
   const mag  = Math.hypot(dlat, dlon);
   if (mag < 1e-9) return { dLat: 0, dLon: 0 };
 
-  // Normalise then scale to real speed (deg-lat per ms)
+  // Normalise then scale to animation speed (deg-lat per ms)
   const speedKmh    = (THREATS[type] || THREATS.unknown).speed;
-  const speedDegMs  = speedKmh * DEG_PER_KM / 3_600_000;
+  const speedDegMs  = speedKmh * DEG_PER_KM / 3_600_000 * ANIM_SPEED_SCALE;
 
   return { dLat: (dlat / mag) * speedDegMs, dLon: (dlon / mag) * speedDegMs };
 }
@@ -319,7 +324,7 @@ function _animatePatrol(obj) {
   const { evt } = obj;
   const marker = (obj.markers && obj.markers[0]) || obj.marker;
   const route   = _patrolRoute(evt.lat, evt.lon);
-  const speedMs = (THREATS[evt.type] || THREATS.aviation).speed * DEG_PER_KM / 3_600_000;
+  const speedMs = (THREATS[evt.type] || THREATS.aviation).speed * DEG_PER_KM / 3_600_000 * ANIM_SPEED_SCALE;
 
   function step(si, t0) {
     if (obj.cancelled || !threats.has(evt.id)) return;
@@ -352,7 +357,7 @@ function _animatePatrol(obj) {
 // MAX_EXTRAP_MS only limits the initial position jump on startup load.
 function _animateMarker(obj, marker, wps, evt) {
   const def = THREATS[evt.type] || THREATS.unknown;
-  const speedDegMs = def.speed * DEG_PER_KM / 3_600_000;
+  const speedDegMs = def.speed * DEG_PER_KM / 3_600_000 * ANIM_SPEED_SCALE;
 
   // Cap initial jump to MAX_EXTRAP_MS so old events don't teleport far on load
   const elapsedMs = Math.min(
@@ -423,17 +428,19 @@ function _animateMarker(obj, marker, wps, evt) {
   _extrapolateMarker(obj, marker, { lat: curLat, lon: curLon }, extrapVel, curBrg, evt);
 }
 
-// Continue moving at physics speed until marker is cancelled by a new update or expiry.
+// Continue moving at animation speed until marker is cancelled by a new update or expiry.
 // This runs forever — it's the "guessing" phase between Telegram updates.
+// Icon is set once here; only position is updated per frame.
 function _extrapolateMarker(obj, marker, origin, vel, brg, evt) {
   if (obj.cancelled || !threats.has(obj.evt.id)) return;
-  const t0 = performance.now();
   const count = (evt || obj.evt).count || 1;
+  // Set icon once — heading doesn't change during extrapolation
+  if (brg != null) marker.setIcon(makeIcon(obj.evt.type, obj.evt.status, brg, count));
+  const t0 = performance.now();
   function step() {
     if (obj.cancelled || !threats.has(obj.evt.id)) return;
     const el = performance.now() - t0;
     marker.setLatLng([origin.lat + vel.dLat * el, origin.lon + vel.dLon * el]);
-    if (brg != null) marker.setIcon(makeIcon(obj.evt.type, obj.evt.status, brg, count));
     requestAnimationFrame(step);
   }
   requestAnimationFrame(step);

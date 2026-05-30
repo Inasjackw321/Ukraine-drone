@@ -568,7 +568,7 @@ CHANNEL_NAMES = {
     "mon1tor_ua":              "Monitor UA",
     "eradar_ua":               "eRadar UA",
     "ukrainian_intelligence":  "UA Intelligence",
-    "operativnoZSU":           "Operational ZSU",
+    "operativnoZSU":           "UA Armed Forces Ops",
     "PovitryanaViiskaUA":      "Air Force UA",
     "air_alert_ua":            "Air Alert UA",
 }

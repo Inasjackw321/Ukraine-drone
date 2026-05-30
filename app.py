@@ -11,6 +11,7 @@ import asyncio
 import json
 import logging
 import os
+import random
 import re
 import sys
 import threading
@@ -457,11 +458,14 @@ STATUS_RE = {
 }
 
 FROM_RE = re.compile(
-    r"(?:з боку|з напрямку|від|із|from\s+the?)\s+([\w\-'іїєА-ЯіїєҐґЄєІіЇї]{3,}(?:\s+[\w\-'іїєА-ЯіїєҐґЄєІіЇї]{3,})?)",
+    r"(?:з\s+боку|з\s+напрямку|від|із|зі?\s+сторони|from\s+(?:the\s+)?(?:direction\s+of\s+)?)"
+    r"([\w\-'іїєА-ЯіїєҐґЄєІіЇї]{3,}(?:\s+[\w\-'іїєА-ЯіїєҐґЄєІіЇї]{3,})?)",
     re.I,
 )
 TO_RE = re.compile(
-    r"(?:у напрямку|в напрямку|\bдо\b|towards?|direction\s+of)\s+([\w\-'іїєА-ЯіїєҐґЄєІіЇї]{3,}(?:\s+[\w\-'іїєА-ЯіїєҐґЄєІіЇї]{3,})?)",
+    r"(?:у\s+напрямку|в\s+напрямку|курс\s+на|курсом\s+на|\bдо\b|towards?\s+|"
+    r"in\s+the\s+direction\s+of|direction\s+of|heading\s+(?:to(?:wards?)?\s+)?)"
+    r"([\w\-'іїєА-ЯіїєҐґЄєІіЇї]{3,}(?:\s+[\w\-'іїєА-ЯіїєҐґЄєІіЇї]{3,})?)",
     re.I,
 )
 COUNT_RE = re.compile(
@@ -473,8 +477,28 @@ GROUP_RE = re.compile(
     re.I,
 )
 
+# Ukrainian number words → integer (for "шість БПЛА" style counts)
+_UA_NUMS: dict[str, int] = {
+    "один": 1, "одна": 1, "одного": 1, "одну": 1,
+    "два": 2, "дві": 2, "двох": 2,
+    "три": 3, "трьох": 3,
+    "чотири": 4, "чотирьох": 4,
+    "п'ять": 5, "п'яти": 5,
+    "шість": 6, "шести": 6,
+    "сім": 7, "семи": 7,
+    "вісім": 8, "восьми": 8,
+    "дев'ять": 9, "дев'яти": 9,
+    "десять": 10, "десяти": 10,
+    "дванадцять": 12, "шістнадцять": 16,
+}
+_UA_NUM_RE = re.compile(
+    r"\b(" + "|".join(re.escape(k) for k in sorted(_UA_NUMS, key=len, reverse=True)) + r")\b"
+    r"\s*(?:шахед|бпла|дрон|ракет|kalibr|uav|uavs|drone|drones|missile|missiles|kar)",
+    re.I,
+)
+
 CHANNEL_NAMES = {
-    "kpszsu":    "КПСЗСУ",
+    "kpszsu":      "UA Air Force",
     "war_monitor": "War Monitor",
     "mon1tor_ua":  "Monitor UA",
     "eradar_ua":   "eRadar UA",
@@ -541,14 +565,17 @@ def parse_message(text: str, channel: str, msg_id: int = 0, msg_date=None) -> di
             break
 
     # Count
-    import random
     m = COUNT_RE.search(text)
     if m:
         count = int(m.group(1))
-    elif GROUP_RE.search(text):
-        count = random.randint(4, 10)
     else:
-        count = 1
+        mw = _UA_NUM_RE.search(text.lower())
+        if mw:
+            count = _UA_NUMS.get(mw.group(1), 1)
+        elif GROUP_RE.search(text):
+            count = random.randint(4, 10)
+        else:
+            count = 1
 
     # Directions (named from/to locations)
     frm = (FROM_RE.search(text) or type("", (), {"group": lambda s, i: None})()).group(1)

@@ -6,7 +6,7 @@
 const THREATS = {
   shahed:    { label: 'Shahed',    color: '#f97316', glow: '#f97316', speed: 150,  cat: 'drone'   },
   geran:     { label: 'Geranium',  color: '#f97316', glow: '#f97316', speed: 150,  cat: 'drone'   },
-  drone:     { label: 'БПЛА',      color: '#60a5fa', glow: '#3b82f6', speed: 150,  cat: 'drone'   },
+  drone:     { label: 'UAV',      color: '#60a5fa', glow: '#3b82f6', speed: 150,  cat: 'drone'   },
   kar:       { label: 'KAR',       color: '#fb923c', glow: '#ea580c', speed: 200,  cat: 'drone'   },
   kalibr:    { label: 'Kalibr',    color: '#ef4444', glow: '#dc2626', speed: 700,  cat: 'missile' },
   x101:      { label: 'X-101',     color: '#f87171', glow: '#ef4444', speed: 780,  cat: 'missile' },
@@ -31,6 +31,8 @@ const DEG_PER_KM = 1 / 111;
 
 // Threat expires after this long (disappears from map)
 const EXPIRE_MS = 30 * 60 * 1000;
+// Cap how far back in time we extrapolate position on load (avoids huge jumps)
+const MAX_EXTRAP_MS = 3 * 60 * 1000;
 
 // ── Map ───────────────────────────────────────────────────────────────────
 const map = L.map('map', {
@@ -182,71 +184,92 @@ function _patrolRoute(lat, lon) {
   ];
 }
 
+// Arrange N markers in a line perpendicular to direction of travel
+function _formationOffsets(count, bearingDeg) {
+  if (count <= 1) return [[0, 0]];
+  const SPACING = 0.055;  // ~6 km between each unit
+  const perpRad = (bearingDeg + 90) * Math.PI / 180;
+  const half = (count - 1) / 2;
+  const offsets = [];
+  for (let i = 0; i < count; i++) {
+    const t = i - half;
+    offsets.push([Math.sin(perpRad) * SPACING * t, Math.cos(perpRad) * SPACING * t]);
+  }
+  return offsets;
+}
+
 function addThreat(evt) {
   if (!evt.lat || !evt.lon) return;
   if (threats.has(evt.id)) removeThreat(evt.id);
 
-  const wps = (evt.waypoints || []).filter(w => w.lat && w.lon);
+  const wps  = (evt.waypoints || []).filter(w => w.lat && w.lon);
   const def  = THREATS[evt.type] || THREATS.unknown;
+  const count = Math.min(evt.count || 1, 6);
 
-  // Prefer cardinal direction parsed from text; fall back to last waypoint bearing
+  // Initial bearing from text direction, or last waypoint segment
   let brg = evt.direction != null ? evt.direction : 0;
   if (brg === 0 && wps.length >= 2) {
     const a = wps[wps.length - 2], b = wps[wps.length - 1];
     brg = bearing(a.lat, a.lon, b.lat, b.lon);
   }
 
-  let marker;
-  try {
-    marker = L.marker([evt.lat, evt.lon], {
-      icon: makeIcon(evt.type, evt.status, brg),
-      zIndexOffset: def.cat === 'missile' ? 1000 : 500,
-    });
-  } catch(e) {
-    marker = L.circleMarker([evt.lat, evt.lon], {
-      radius: 10, color: def.color, fillColor: def.color, fillOpacity: 0.85,
-    });
-  }
-  marker.bindPopup(popup(evt), { maxWidth: 280 });
-  marker.addTo(layers.markers);
-
-  // Trajectory trail (no ant-path dependency)
+  const offsets = _formationOffsets(count, brg);
+  const markers = [];
   const trailLines = [];
+
+  offsets.forEach((off) => {
+    const lat = evt.lat + off[0], lon = evt.lon + off[1];
+    let m;
+    try {
+      m = L.marker([lat, lon], {
+        icon: makeIcon(evt.type, evt.status, brg),
+        zIndexOffset: def.cat === 'missile' ? 1000 : 500,
+      });
+    } catch(e) {
+      m = L.circleMarker([lat, lon], {
+        radius: 10, color: def.color, fillColor: def.color, fillOpacity: 0.85,
+      });
+    }
+    m.bindPopup(popup(evt), { maxWidth: 300 });
+    m.addTo(layers.markers);
+    markers.push(m);
+  });
+
+  // Trail + projection on primary marker only
   if (wps.length >= 2) {
-    const lls = wps.map(w => [w.lat, w.lon]);
-    trailLines.push(L.polyline(lls, {
-      color: def.color, weight: 2, opacity: 0.55,
-      dashArray: '6 10',
+    trailLines.push(L.polyline(wps.map(w => [w.lat, w.lon]), {
+      color: def.color, weight: 2, opacity: 0.55, dashArray: '6 10',
     }).addTo(layers.paths));
 
-    // Projection line: use evt.direction if available, else derive from waypoints
     let vel;
     if (evt.direction != null) {
       const rad = evt.direction * Math.PI / 180;
-      const speedDegMs = def.speed * DEG_PER_KM / 3_600_000;
-      vel = { dLat: Math.cos(rad) * speedDegMs, dLon: Math.sin(rad) * speedDegMs };
+      const spd = def.speed * DEG_PER_KM / 3_600_000;
+      vel = { dLat: Math.cos(rad) * spd, dLon: Math.sin(rad) * spd };
     } else {
       vel = computeVelocity(wps, evt.type);
     }
     const msLeft = EXPIRE_MS - (Date.now() - new Date(evt.ts).getTime());
     const last = wps[wps.length - 1];
-    const projEnd = {
-      lat: last.lat + vel.dLat * Math.max(msLeft, 10_000),
-      lon: last.lon + vel.dLon * Math.max(msLeft, 10_000),
-    };
-    trailLines.push(L.polyline([[last.lat, last.lon], [projEnd.lat, projEnd.lon]], {
-      color: def.color, weight: 1, opacity: 0.18, dashArray: '2 14',
-    }).addTo(layers.trails));
+    trailLines.push(L.polyline(
+      [[last.lat, last.lon],
+       [last.lat + vel.dLat * Math.max(msLeft, 10_000),
+        last.lon + vel.dLon * Math.max(msLeft, 10_000)]],
+      { color: def.color, weight: 1, opacity: 0.18, dashArray: '2 14' }
+    ).addTo(layers.trails));
   }
 
-  const obj = { evt, marker, trailLines, animFrame: null, cancelled: false };
+  const obj = { evt, markers, marker: markers[0], trailLines, cancelled: false };
   threats.set(evt.id, obj);
 
   if (evt.status !== 'destroyed') {
     if (evt.type === 'aviation') {
       _animatePatrol(obj);
     } else {
-      _animate(obj, wps);
+      offsets.forEach((off, i) => {
+        const offsetWps = wps.map(w => ({ lat: w.lat + off[0], lon: w.lon + off[1], name: w.name }));
+        _animateMarker(obj, markers[i], offsetWps, evt);
+      });
     }
   }
 
@@ -259,8 +282,7 @@ function removeThreat(id) {
   const obj = threats.get(id);
   if (!obj) return;
   obj.cancelled = true;
-  if (obj.animFrame) cancelAnimationFrame(obj.animFrame);
-  layers.markers.removeLayer(obj.marker);
+  (obj.markers || (obj.marker ? [obj.marker] : [])).forEach(m => layers.markers.removeLayer(m));
   obj.trailLines.forEach(l => {
     layers.paths.removeLayer(l);
     layers.trails.removeLayer(l);
@@ -271,7 +293,8 @@ function removeThreat(id) {
 
 // ── Patrol animation (aviation — loops forever) ───────────────────────────
 function _animatePatrol(obj) {
-  const { evt, marker } = obj;
+  const { evt } = obj;
+  const marker = (obj.markers && obj.markers[0]) || obj.marker;
   const route   = _patrolRoute(evt.lat, evt.lon);
   const speedMs = (THREATS[evt.type] || THREATS.aviation).speed * DEG_PER_KM / 3_600_000;
 
@@ -300,20 +323,19 @@ function _animatePatrol(obj) {
 }
 
 // ── Animation ─────────────────────────────────────────────────────────────
-// Starts from the threat's real-world position based on elapsed time since
-// the message was sent, then extrapolates forward at physics speed.
-function _animate(obj, wps) {
-  const { evt, marker } = obj;
+// Compute current real-world position from elapsed time, then animate forward.
+// Elapsed time is capped at MAX_EXTRAP_MS so old events don't jump far.
+function _animateMarker(obj, marker, wps, evt) {
   const def = THREATS[evt.type] || THREATS.unknown;
   const speedDegMs = def.speed * DEG_PER_KM / 3_600_000;
 
-  // Time since Telegram message was sent
-  const elapsedMs = Math.max(0, Date.now() - new Date(evt.ts).getTime());
+  const elapsedMs = Math.min(
+    Math.max(0, Date.now() - new Date(evt.ts).getTime()),
+    MAX_EXTRAP_MS
+  );
 
-  // Cardinal direction parsed from message text (0-359°), or null
   const cardinalBrg = evt.direction != null ? evt.direction : null;
 
-  // Velocity vector for extrapolation: prefer text direction, else waypoints
   let extrapVel;
   if (cardinalBrg != null) {
     const rad = cardinalBrg * Math.PI / 180;
@@ -324,14 +346,12 @@ function _animate(obj, wps) {
     extrapVel = { dLat: 0, dLon: 0 };
   }
 
-  // Walk waypoints at real physics speed to find where the threat is now
   let curLat, curLon, curBrg;
   if (wps.length >= 2) {
     let distLeft = speedDegMs * elapsedMs;
     curLat = wps[0].lat; curLon = wps[0].lon;
     curBrg = bearing(wps[0].lat, wps[0].lon, wps[1].lat, wps[1].lon);
     let pastEnd = true;
-
     for (let i = 0; i < wps.length - 1; i++) {
       const a = wps[i], b = wps[i + 1];
       const segDist = Math.hypot(b.lat - a.lat, b.lon - a.lon);
@@ -345,47 +365,41 @@ function _animate(obj, wps) {
       distLeft -= segDist;
       curLat = b.lat; curLon = b.lon;
     }
-
-    // Beyond last waypoint: extrapolate using direction vector
     if (pastEnd && distLeft > 0) {
       const extraMs = distLeft / speedDegMs;
       curLat += extrapVel.dLat * extraMs;
       curLon += extrapVel.dLon * extraMs;
     }
   } else {
-    // Single location: extrapolate from origin
     const origin = wps[0] || { lat: evt.lat, lon: evt.lon };
     curLat = origin.lat + extrapVel.dLat * elapsedMs;
     curLon = origin.lon + extrapVel.dLon * elapsedMs;
     curBrg = cardinalBrg != null ? cardinalBrg : 0;
   }
 
-  // Text-parsed direction always wins for icon pointing
   if (cardinalBrg != null) curBrg = cardinalBrg;
 
   marker.setLatLng([curLat, curLon]);
   marker.setIcon(makeIcon(evt.type, evt.status, curBrg));
 
-  // Continue moving forward in real-time at physics speed
   if (extrapVel.dLat !== 0 || extrapVel.dLon !== 0) {
-    _extrapolate(obj, { lat: curLat, lon: curLon }, extrapVel, curBrg);
+    _extrapolateMarker(obj, marker, { lat: curLat, lon: curLon }, extrapVel, curBrg);
   }
 }
 
-// Continues motion from current position at constant physics-speed velocity
-function _extrapolate(obj, origin, vel, brg) {
+// Continue moving at constant physics speed until marker is cancelled
+function _extrapolateMarker(obj, marker, origin, vel, brg) {
   if (obj.cancelled || !threats.has(obj.evt.id)) return;
-  const { evt, marker } = obj;
+  const { evt } = obj;
   const t0 = performance.now();
-
   function step() {
     if (obj.cancelled || !threats.has(obj.evt.id)) return;
     const el = performance.now() - t0;
     marker.setLatLng([origin.lat + vel.dLat * el, origin.lon + vel.dLon * el]);
     if (brg != null) marker.setIcon(makeIcon(evt.type, evt.status, brg));
-    obj.animFrame = requestAnimationFrame(step);
+    requestAnimationFrame(step);
   }
-  step();
+  requestAnimationFrame(step);
 }
 
 // ── Stats ─────────────────────────────────────────────────────────────────

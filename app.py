@@ -2979,6 +2979,16 @@ LOCS: dict[str, tuple[float, float]] = {
     "rovnoye": (45.3507, 34.3505),
 }
 
+# Merge extra locations from OSM shapefile (all populated places pop≥200)
+_locs_extra_path = HERE / "locs_extra.json"
+if _locs_extra_path.exists():
+    import json as _json
+    with _locs_extra_path.open(encoding="utf-8") as _f:
+        for _k, _v in _json.load(_f).items():
+            if _k not in LOCS:
+                LOCS[_k] = (_v[0], _v[1])
+    log.debug("Loaded %d extra locations from locs_extra.json", len(LOCS))
+
 # Pre-sorted once for find_locations() — longest key first for greedy matching
 _LOCS_SORTED = sorted(LOCS.keys(), key=len, reverse=True)
 

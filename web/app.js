@@ -329,11 +329,10 @@ function _animateMarker(obj, marker, wps, evt) {
   const def = THREATS[evt.type] || THREATS.unknown;
   const speedDegMs = def.speed * DEG_PER_KM / 3_600_000;
 
-  // Cap initial jump to MAX_EXTRAP_MS so old events don't teleport far on load
-  const elapsedMs = Math.min(
-    Math.max(0, Date.now() - new Date(evt.ts).getTime()),
-    MAX_EXTRAP_MS
-  );
+  // When a named destination exists, always start from origin so movement is visible.
+  // For position-only events, cap elapsed to MAX_EXTRAP_MS to avoid huge jumps on load.
+  const rawElapsed = Math.max(0, Date.now() - new Date(evt.ts).getTime());
+  const elapsedMs = (evt.to_lat && evt.to_lon) ? 0 : Math.min(rawElapsed, MAX_EXTRAP_MS);
 
   const cardinalBrg = evt.direction != null ? evt.direction : null;
 

@@ -22,6 +22,11 @@ const THREATS = {
   aviation:  { label: 'Aviation',   color: '#38bdf8', glow: '#0ea5e9', speed: 800,  cat: 'aviation'   },
 };
 
+const STATUS_CLASS = {
+  moving: 's-moving', destroyed: 's-destroyed',
+  alert:  's-alert',  launch:    's-launch', unknown: 's-unknown',
+};
+
 // 1 degree latitude ≈ 111 km — used to convert km/h to deg/ms
 const DEG_PER_KM = 1 / 111;
 
@@ -30,7 +35,7 @@ const EXPIRE_MS = 30 * 60 * 1000;
 // How far back in time to extrapolate position on initial load.
 // Matches the 20-min history window so a drone reported 20 min ago
 // appears at its current estimated position, not its original reported spot.
-const MAX_EXTRAP_MS = 5 * 60 * 1000;
+const MAX_EXTRAP_MS = 20 * 60 * 1000;
 
 // ── Map ───────────────────────────────────────────────────────────────────
 const map = L.map('map', {
@@ -60,67 +65,84 @@ const layers = {
 };
 
 // ── SVG icon factory ──────────────────────────────────────────────────────
-// Simple directional arrow shapes in a 16×16 viewBox, pointing north (0°),
-// rotated by bearing via CSS. No glow/filter — crisp small icons like the
-// reference intelligence maps.
+// All icons are arrow shapes pointing "up" (north=0°), rotated via CSS.
+// The outer ring color shows status; the inner fill shows threat type.
 
 const SHAPES = {
-  // DRONE / SHAHED — broad arrowhead (wide, flat, clearly a delta wing)
-  drone:     'M8,0 L16,14 L8,9 L0,14 Z',
-  shahed:    'M8,0 L16,14 L8,9 L0,14 Z',
-  geran:     'M8,0 L16,14 L8,9 L0,14 Z',
-  kar:       'M8,0 L16,14 L8,9 L0,14 Z',
-  // CRUISE MISSILE — narrow dart (slim, elongated)
-  missile:   'M8,0 L11,16 L8,11 L5,16 Z',
-  kalibr:    'M8,0 L11,16 L8,11 L5,16 Z',
-  x101:      'M8,0 L11,16 L8,11 L5,16 Z',
-  x59:       'M8,0 L11,16 L8,11 L5,16 Z',
-  x22:       'M8,0 L11,16 L8,11 L5,16 Z',
-  oniks:     'M8,0 L11,16 L8,11 L5,16 Z',
-  // KINZHAL — ultra-slim spike
-  kinzhal:   'M8,0 L9.5,16 L8,12 L6.5,16 Z',
-  // ISKANDER / BALLISTIC — slightly wider dart, blunt nose
-  iskander:  'M8,1 L13,16 L8,11 L3,16 Z',
-  ballistic: 'M8,1 L13,16 L8,11 L3,16 Z',
-  // GLIDE BOMB — diamond (wide swept wing)
-  glidebomb: 'M8,0 L16,8 L8,16 L0,8 Z',
-  // UNKNOWN — simple triangle
-  unknown:   'M8,0 L16,14 L8,9 L0,14 Z',
-  // AVIATION — top-down cross/aircraft
+  // drones: swept-wing delta shape
+  drone:     'M8,1 L15,13 L11,11 L8,14 L5,11 L1,13 Z',
+  shahed:    'M8,1 L15,13 L11,11 L8,14 L5,11 L1,13 Z',
+  geran:     'M8,1 L15,13 L11,11 L8,14 L5,11 L1,13 Z',
+  kar:       'M8,1 L15,13 L11,11 L8,14 L5,11 L1,13 Z',
+  // cruise missiles: slim sleek dart with notched tail
+  missile:   'M8,0 L12,12 L10,11 L8,15 L6,11 L4,12 Z',
+  kalibr:    'M8,0 L12,12 L10,11 L8,15 L6,11 L4,12 Z',
+  x101:      'M8,0 L12,12 L10,11 L8,15 L6,11 L4,12 Z',
+  x59:       'M8,0 L12,12 L10,11 L8,15 L6,11 L4,12 Z',
+  x22:       'M8,0 L12,12 L10,11 L8,15 L6,11 L4,12 Z',
+  oniks:     'M8,0 L12,12 L10,11 L8,15 L6,11 L4,12 Z',
+  // kinzhal: ultra-slim needle with double notch
+  kinzhal:   'M8,0 L10,14 L8,11 L6,14 Z',
+  // ballistic / iskander: rounded warhead silhouette
+  iskander:  'M8,1 C11,1 13,5 13,10 C13,14 11,15 8,15 C5,15 3,14 3,10 C3,5 5,1 8,1 Z',
+  ballistic: 'M8,1 C11,1 13,5 13,10 C13,14 11,15 8,15 C5,15 3,14 3,10 C3,5 5,1 8,1 Z',
+  // glide bomb: swept diamond — short broad wing
+  glidebomb: 'M8,2 L15,7 L12,8 L8,15 L4,8 L1,7 Z',
+  unknown:   'M8,2 L14,13 L8,10 L2,13 Z',
+  // top-down aircraft silhouette
   aviation:  'M8,0 L10,5 L16,6 L16,8 L10,8 L11,16 L8,14 L5,16 L6,8 L0,8 L0,6 L6,5 Z',
 };
 
-function makeIcon(type, status, bearingDeg, count) {
-  const def  = THREATS[type] || THREATS.unknown;
-  const shape = SHAPES[type] || SHAPES.unknown;
-  const isActive = status === 'moving' || status === 'launch' || status === 'alert';
-  const isDead   = status === 'destroyed';
-  // Drone wider, missile slimmer, aviation bigger
-  const size = def.cat === 'drone' ? 30 : def.cat === 'missile' ? 24 : def.cat === 'aviation' ? 34 : 28;
-  const n = count > 1 ? count : 0;
-  const fill    = isDead ? '#64748b' : def.color;
-  const outline = isDead ? '#22c55e' : '#000000aa';
-  const anim    = isActive ? 'animation:iconPulse 2s infinite' : '';
+const RING_COLORS = {
+  moving: '#f97316', launch: '#ef4444',
+  alert:  '#facc15', destroyed: '#22c55e', unknown: '#64748b',
+};
 
-  // Rotating SVG arrow — no glow, no ring, crisp like a map symbol
-  const html = `<div style="position:relative;width:${size}px;height:${size}px">
-    <svg width="${size}" height="${size}" viewBox="0 0 16 16"
-         style="transform:rotate(${bearingDeg}deg);overflow:visible;${anim}">
-      <path d="${shape}" fill="${fill}" stroke="${outline}" stroke-width="0.8"
-            stroke-linejoin="round" opacity="${isDead ? 0.6 : 1}"/>
-    </svg>
-    ${n ? `<span style="position:absolute;bottom:-11px;left:50%;transform:translateX(-50%);
-             font:bold 9px/1 monospace;color:${def.color};
-             text-shadow:-1px -1px 0 #000,1px -1px 0 #000,-1px 1px 0 #000,1px 1px 0 #000;
-             white-space:nowrap">×${n}</span>` : ''}
-  </div>`;
+function makeIcon(type, status, bearingDeg, count) {
+  const def   = THREATS[type] || THREATS.unknown;
+  const shape = SHAPES[type]  || SHAPES.unknown;
+  const ring  = RING_COLORS[status] || RING_COLORS.unknown;
+  const isActive = status === 'moving' || status === 'launch' || status === 'alert';
+  const pulse = isActive ? 'style="animation:iconPulse 1.8s infinite"' : '';
+  const size  = type === 'kinzhal' ? 50 : (def.cat === 'glidebomb' ? 54 : def.cat === 'missile' ? 46 : 54);
+  const n = count > 1 ? count : 0;
+  const uid = Math.random().toString(36).slice(2, 7);
+
+  // Lighter tint of the fill color for the gradient highlight
+  const svg = `
+    <svg width="${size}" height="${size}" viewBox="0 0 20 22"
+         style="transform:rotate(${bearingDeg}deg)" ${pulse}>
+      <defs>
+        <radialGradient id="g${uid}" cx="40%" cy="30%" r="65%">
+          <stop offset="0%"   stop-color="#ffffff" stop-opacity="0.35"/>
+          <stop offset="100%" stop-color="${def.color}" stop-opacity="0"/>
+        </radialGradient>
+        <filter id="f${uid}" x="-40%" y="-40%" width="180%" height="180%">
+          <feGaussianBlur in="SourceGraphic" stdDeviation="1.8" result="blur"/>
+          <feColorMatrix in="blur" type="matrix"
+            values="1 0 0 0 0  0 1 0 0 0  0 0 1 0 0  0 0 0 14 -5" result="glow"/>
+          <feMerge><feMergeNode in="glow"/><feMergeNode in="SourceGraphic"/></feMerge>
+        </filter>
+      </defs>
+      <g transform="scale(1.25) translate(0,-1)" filter="url(#f${uid})">
+        <path d="${shape}" fill="${def.color}" opacity="0.95"
+              stroke="${def.glow}" stroke-width="0.4" stroke-opacity="0.6"/>
+        <path d="${shape}" fill="url(#g${uid})"/>
+        <circle cx="8" cy="8" r="7" fill="none" stroke="${ring}"
+                stroke-width="1.5" opacity="0.9"
+                stroke-dasharray="${status === 'destroyed' ? '3 2' : 'none'}"/>
+      </g>
+      ${n ? `<text x="10" y="21" text-anchor="middle" font-family="monospace"
+               font-size="5.5" font-weight="bold" fill="white"
+               stroke="#080c10" stroke-width="1">×${n}</text>` : ''}
+    </svg>`;
 
   return L.divIcon({
-    html,
+    html: svg,
     className: '',
-    iconSize:   [size, size],
+    iconSize: [size, size],
     iconAnchor: [size / 2, size / 2],
-    popupAnchor:[0, -(size / 2 + 4)],
+    popupAnchor: [0, -size / 2],
   });
 }
 
@@ -207,13 +229,13 @@ function _patrolRoute(lat, lon) {
 // Arrange N markers in a line perpendicular to direction of travel
 function _formationOffsets(count, bearingDeg) {
   if (count <= 1) return [[0, 0]];
-  const SPACING = 0.28;  // ~31 km gap between units — balanced for zoom 6-8
-  const brRad = bearingDeg * Math.PI / 180;
+  const SPACING = 0.055;  // ~6 km between each unit
+  const perpRad = (bearingDeg + 90) * Math.PI / 180;
   const half = (count - 1) / 2;
   const offsets = [];
   for (let i = 0; i < count; i++) {
     const t = i - half;
-    offsets.push([-Math.sin(brRad) * SPACING * t, Math.cos(brRad) * SPACING * t]);
+    offsets.push([Math.sin(perpRad) * SPACING * t, Math.cos(perpRad) * SPACING * t]);
   }
   return offsets;
 }
@@ -224,9 +246,9 @@ function addThreat(evt) {
 
   const wps  = (evt.waypoints || []).filter(w => w.lat && w.lon);
   const def  = THREATS[evt.type] || THREATS.unknown;
-  const count = Math.min(evt.count || 1, 12);
+  const count = Math.min(evt.count || 1, 6);
 
-  // Initial bearing from text direction, or last waypoint segment
+  // Initial bearing from text direction, or last waypoint segment, or default south
   let brg = evt.direction != null ? evt.direction : 180;
   if (brg === 180 && wps.length >= 2) {
     const a = wps[wps.length - 2], b = wps[wps.length - 1];
@@ -358,7 +380,7 @@ function _animateMarker(obj, marker, wps, evt) {
     extrapVel  = { dLat: Math.cos(rad) * speedDegMs, dLon: Math.sin(rad) * speedDegMs };
     guessedBrg = cardinalBrg;
   } else if (evt.to_lat && evt.to_lon) {
-    // Aim toward the named destination — most authoritative heading signal
+    // Aim toward the named destination
     const toBrg = bearing(evt.lat, evt.lon, evt.to_lat, evt.to_lon);
     const rad = toBrg * Math.PI / 180;
     extrapVel  = { dLat: Math.cos(rad) * speedDegMs, dLon: Math.sin(rad) * speedDegMs };
@@ -424,7 +446,7 @@ function _extrapolateMarker(obj, marker, origin, vel, brg, evt) {
   const count = (evt || obj.evt).count || 1;
   if (brg != null) marker.setIcon(makeIcon(obj.evt.type, obj.evt.status, brg, count));
   const t0 = performance.now();
-  // If there's a known destination, stop there instead of flying past
+  // Stop at named destination instead of flying past it
   const destDist = (evt && evt.to_lat && evt.to_lon)
     ? Math.hypot(evt.to_lat - origin.lat, evt.to_lon - origin.lon)
     : null;
@@ -434,7 +456,7 @@ function _extrapolateMarker(obj, marker, origin, vel, brg, evt) {
     const el = performance.now() - t0;
     if (destDist !== null && velMag > 0 && velMag * el >= destDist) {
       marker.setLatLng([evt.to_lat, evt.to_lon]);
-      return;  // arrived at destination — stop animating
+      return;  // arrived — stop animating
     }
     marker.setLatLng([origin.lat + vel.dLat * el, origin.lon + vel.dLon * el]);
     requestAnimationFrame(step);
@@ -449,6 +471,7 @@ function updateStats() {
     if (o.evt.status === 'destroyed') destroyed++;
     else active++;
   }
+  document.getElementById('c-total').textContent     = totalCount;
   document.getElementById('c-active').textContent    = active;
   document.getElementById('c-destroyed').textContent = destroyed;
   const nt = document.getElementById('no-threats');
@@ -468,13 +491,86 @@ setInterval(() => {
   }
 }, 30_000);
 
+// ── Feed ──────────────────────────────────────────────────────────────────
+function addFeedItem(evt) {
+  const def  = THREATS[evt.type] || THREATS.unknown;
+  const time = new Date(evt.ts).toLocaleTimeString('en-US', { hour:'2-digit', minute:'2-digit' });
+  const sCls = STATUS_CLASS[evt.status] || 's-unknown';
+
+  const el = document.createElement('div');
+  el.className  = 'item';
+  el.dataset.cat    = def.cat;
+  el.dataset.status = evt.status || 'unknown';
+
+  el.innerHTML = `
+    <div class="item-top">
+      <span class="item-icon">
+        <svg width="14" height="14" viewBox="0 0 16 16">
+          <path d="${SHAPES[evt.type] || SHAPES.unknown}" fill="${def.color}"/>
+        </svg>
+      </span>
+      <span class="item-type" style="color:${def.color}">${def.label} × ${evt.count||1}</span>
+      <span class="badge ${sCls}">${evt.status||'?'}</span>
+      <span class="item-time">${time}</span>
+    </div>
+    ${evt.location ? `<div class="item-loc">📍 ${evt.location}</div>` : ''}
+    <div class="item-text">${evt.text || ''}</div>
+    <div class="item-ch">${evt.channel || ''}</div>`;
+
+  el.addEventListener('click', () => {
+    if (evt.lat && evt.lon) map.setView([evt.lat, evt.lon], 9, { animate: true });
+    const o = threats.get(evt.id);
+    if (o) o.marker.openPopup();
+  });
+
+  applyFilter(el);
+  const feed = document.getElementById('feed');
+  feed.insertBefore(el, feed.firstChild);
+  while (feed.children.length > 150) feed.removeChild(feed.lastChild);
+}
+
+// ── Filters ───────────────────────────────────────────────────────────────
+let activeFilter = 'all';
+
+document.querySelectorAll('.f').forEach(b => {
+  b.addEventListener('click', () => {
+    document.querySelectorAll('.f').forEach(x => x.classList.remove('active'));
+    b.classList.add('active');
+    activeFilter = b.dataset.f;
+    document.querySelectorAll('.item').forEach(applyFilter);
+  });
+});
+
+function applyFilter(el) {
+  const show = activeFilter === 'all'
+    || activeFilter === el.dataset.cat
+    || activeFilter === el.dataset.status;
+  el.classList.toggle('hidden', !show);
+}
+
+// ── Update status display ─────────────────────────────────────────────────
+function _setUpdateTxt(text) {
+  const el = document.getElementById('update-txt');
+  if (el) el.textContent = text;
+}
+
+// ── CSS pulse animation injection ────────────────────────────────────────
+document.head.insertAdjacentHTML('beforeend', `
+  <style>
+    @keyframes iconPulse {
+      0%,100%{opacity:1;filter:drop-shadow(0 0 4px currentColor)}
+      50%{opacity:.65;filter:drop-shadow(0 0 10px currentColor)}
+    }
+  </style>`);
+
 // ── WebSocket ─────────────────────────────────────────────────────────────
 let ws, wsRetries = 0;
 
 function connect() {
-  const url = `${location.protocol === 'https:' ? 'wss' : 'ws'}://${location.host}/ws`;
+  const url = `${location.protocol==='https:'?'wss':'ws'}://${location.host}/ws`;
   setConn('connecting');
   ws = new WebSocket(url);
+
   ws.onopen  = () => { wsRetries = 0; setConn('live'); };
   ws.onclose = () => {
     setConn('error');
@@ -482,47 +578,112 @@ function connect() {
     wsRetries++;
   };
   ws.onerror = () => ws.close();
+
   ws.onmessage = ({ data }) => {
     let m;
     try { m = JSON.parse(data); } catch { return; }
-    if (m.type === 'event')        handleEvent(m.data);
-    else if (m.type === 'history') [...m.data].reverse().forEach(handleEvent);
+    if (m.type === 'event') {
+      handleEvent(m.data);
+    } else if (m.type === 'history') {
+      [...m.data].reverse().forEach(handleEvent);
+    } else if (m.type === 'next_update') {
+      _setUpdateTxt(m.at === 'live' ? 'Live — instant updates' : 'Loading history…');
+    }
   };
 }
 
 function handleEvent(evt) {
   if (!evt || !evt.id || hasSeen(evt.id)) return;
   markSeen(evt.id);
+  totalCount++;
   try { addThreat(evt); } catch(e) { console.error('addThreat', e, evt); }
+  try { addFeedItem(evt); } catch(e) { console.error('addFeedItem', e, evt); }
   updateStats();
 }
 
 function setConn(state) {
   const dot = document.getElementById('conn-dot');
   const txt = document.getElementById('conn-txt');
-  if (!dot || !txt) return;
-  dot.className  = `dot${state === 'live' ? ' live' : state === 'error' ? ' error' : ''}`;
-  txt.textContent = { connecting: 'Connecting…', live: 'Live', error: 'Reconnecting…' }[state];
+  dot.className = `dot${state === 'live' ? ' live' : state === 'error' ? ' error' : ''}`;
+  txt.textContent = { connecting: 'Connecting…', live: 'Connected', error: 'Reconnecting…' }[state];
 }
 
-// ── HTTP polling — XMLHttpRequest for pywebview compatibility ─────────────
+// ── HTTP polling — XMLHttpRequest instead of fetch() for pywebview compat ──
 function pollEvents() {
   const xhr = new XMLHttpRequest();
   xhr.onreadystatechange = function() {
     if (xhr.readyState !== 4) return;
     if (xhr.status === 200) {
-      try { (JSON.parse(xhr.responseText).events || []).forEach(handleEvent); } catch(e) {}
+      try {
+        const data = JSON.parse(xhr.responseText);
+        const evts = data.events || [];
+        if (evts.length > 0) {
+          document.getElementById('conn-txt').textContent = 'Live · ' + evts.length + ' event' + (evts.length === 1 ? '' : 's');
+          document.getElementById('conn-dot').className = 'dot live';
+        }
+        evts.forEach(handleEvent);
+      } catch(e) {
+        document.getElementById('conn-txt').textContent = 'Parse error';
+      }
+    } else if (xhr.status !== 0) {
+      document.getElementById('conn-txt').textContent = 'Poll error ' + xhr.status;
     }
     setTimeout(pollEvents, 3000);
   };
-  xhr.onerror = () => setTimeout(pollEvents, 3000);
+  xhr.onerror = function() {
+    document.getElementById('conn-txt').textContent = 'XHR error – retrying';
+    setTimeout(pollEvents, 3000);
+  };
   xhr.open('GET', window.location.origin + '/api/events', true);
+  xhr.send();
+}
+
+// ── RAW message feed tab ──────────────────────────────────────────────────
+let rawTab = false;
+
+document.querySelectorAll('.tab-btn').forEach(btn => {
+  btn.addEventListener('click', () => {
+    document.querySelectorAll('.tab-btn').forEach(b => b.classList.remove('active'));
+    btn.classList.add('active');
+    rawTab = btn.dataset.tab === 'raw';
+    document.getElementById('feed').style.display    = rawTab ? 'none' : '';
+    document.getElementById('feed-raw').style.display = rawTab ? '' : 'none';
+  });
+});
+
+function pollRawMessages() {
+  const xhr = new XMLHttpRequest();
+  xhr.onreadystatechange = function() {
+    if (xhr.readyState !== 4 || xhr.status !== 200) return;
+    try {
+      const msgs = JSON.parse(xhr.responseText).messages || [];
+      const el = document.getElementById('feed-raw');
+      if (!el) return;
+      el.innerHTML = '';
+      msgs.forEach(msg => {
+        const time = new Date(msg.ts).toLocaleTimeString('en-US',
+          { hour: '2-digit', minute: '2-digit', hour12: false });
+        const div = document.createElement('div');
+        div.className = 'raw-item ' + (msg.plotted ? 'r-plotted' : 'r-unplotted');
+        div.innerHTML = `<div class="raw-header">
+          <span class="raw-ch">${msg.channel}</span>
+          <span class="raw-time">${time}</span>
+          ${msg.plotted ? '<span class="raw-badge">PLOTTED</span>' : ''}
+        </div>
+        <div class="raw-text">${(msg.text || '').substring(0, 300)}</div>`;
+        el.appendChild(div);
+      });
+    } catch(e) {}
+  };
+  xhr.open('GET', window.location.origin + '/api/messages', true);
   xhr.send();
 }
 
 // ── Boot ──────────────────────────────────────────────────────────────────
 connect();
 pollEvents();
+pollRawMessages();
+setInterval(pollRawMessages, 30_000);
 setInterval(() => {
   const now = Date.now();
   for (const [id, o] of threats)

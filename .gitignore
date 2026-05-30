@@ -3,5 +3,5 @@ __pycache__/
 *.session
 *.session-journal
 config.json
-error.log
 .claude/
+error.log

@@ -1147,7 +1147,7 @@ _OBLAST_HINT_RE = re.compile(
 )
 
 
-def parse_message(text: str, channel: str, msg_id: int = 0, msg_date=None) -> dict | None:
+def parse_message(text: str, channel: str, msg_id: int = 0, msg_date=None, raw_text: str = "") -> dict | None:
     if not text or len(text) < 10:
         return None
 
@@ -1183,12 +1183,14 @@ def parse_message(text: str, channel: str, msg_id: int = 0, msg_date=None) -> di
             status = st
             break
 
-    # Count — priority: range > explicit digit > UA word > EN word > at-least > group > plural > 1
-    mr = _RANGE_RE.search(text)
-    m  = COUNT_RE.search(text)
-    mw = _UA_NUM_RE.search(text.lower())
-    me = _EN_NUM_RE.search(text.lower())
-    ma = _AT_LEAST_RE.search(text)
+    # Count — check both translated text and original (Ukrainian "БПЛА" doesn't inflect for plural)
+    # Priority: range > explicit digit > UA word > EN word > at-least > group > plural > 1
+    combined = text + " " + raw_text  # search both for maximum count signal
+    mr = _RANGE_RE.search(combined)
+    m  = COUNT_RE.search(combined)
+    mw = _UA_NUM_RE.search(combined.lower())
+    me = _EN_NUM_RE.search(text.lower())    # EN numbers only on translated text
+    ma = _AT_LEAST_RE.search(combined)
     if mr:
         count = int(mr.group(2))                          # upper bound of range
     elif m:
@@ -1200,9 +1202,9 @@ def parse_message(text: str, channel: str, msg_id: int = 0, msg_date=None) -> di
     elif ma:
         n = ma.group(1) or ma.group(2)
         count = int(n) + 1 if ma.group(1) else int(n)    # "more than 5" → 6, "5+" → 5
-    elif GROUP_RE.search(text):
+    elif GROUP_RE.search(combined):
         count = 3                                          # conservative: group = at least 3
-    elif _PLURAL_RE.search(text):
+    elif _PLURAL_RE.search(combined):
         count = 2                                          # plural noun = at least 2
     else:
         count = 1
@@ -1481,9 +1483,11 @@ async def _telegram_loop(cfg: dict) -> None:
         _raw_messages.appendleft(raw_entry)
 
         segments = split_segments(text) or [text]
+        raw_segments = split_segments(raw) or [raw]
         any_plotted = False
         for i, seg in enumerate(segments):
-            evt = parse_message(seg, slug, msg.id, msg_date=msg_date)
+            raw_seg = raw_segments[i] if i < len(raw_segments) else raw
+            evt = parse_message(seg, slug, msg.id, msg_date=msg_date, raw_text=raw_seg)
             if not evt:
                 continue
             waypoints = evt.get("waypoints", [])

@@ -3287,14 +3287,15 @@ def parse_message(text: str, channel: str, msg_id: int = 0, msg_date=None, raw_t
     if not text or len(text) < 10:
         return None
 
-    # Normalize: lowercase + Latin homoglyphs → Cyrillic
-    # re.I doesn't always fold mixed-case Cyrillic reliably; lowercase first
-    norm = _cyr_normalize(text).lower()
+    # Build search corpus: translated + original raw, both lowercased + homoglyph-normalised
+    norm_en  = _cyr_normalize(text).lower()
+    norm_raw = _cyr_normalize(raw_text).lower() if raw_text else ""
+    corpus   = norm_en + " " + norm_raw   # search both together
 
-    # Detect primary threat type
+    # Detect primary threat type — search entire corpus
     threat = "unknown"
     for pat, name in THREAT_RE:
-        if pat.search(norm) or pat.search(text):
+        if pat.search(corpus):
             threat = name
             break
 
@@ -3303,11 +3304,13 @@ def parse_message(text: str, channel: str, msg_id: int = 0, msg_date=None, raw_t
         log.info("[%s] NO-WEAPON: %.80s", channel, text.replace("\n", " "))
         return None
 
-    locs = find_locations(norm) or find_locations(text)
+    # Find locations — try translated first, fall back to raw
+    locs = find_locations(text) or (find_locations(raw_text) if raw_text else [])
 
-    # Fallback: if LOCS matching found nothing, try oblast-level hint
+    # Fallback: oblast-level hint from either text
     if not locs:
-        hm = _OBLAST_HINT_RE.search(norm) or _OBLAST_HINT_RE.search(text)
+        hm = (_OBLAST_HINT_RE.search(norm_en) or
+              (_OBLAST_HINT_RE.search(norm_raw) if norm_raw else None))
         if hm:
             key = hm.group().lower()
             lat, lon = OBLAST_HINTS[key]
@@ -3319,13 +3322,13 @@ def parse_message(text: str, channel: str, msg_id: int = 0, msg_date=None, raw_t
     # Status — default "alert" (most channel posts without a status keyword are alerts)
     status = "alert"
     for st, pat in STATUS_RE.items():
-        if pat.search(text):
+        if pat.search(corpus):
             status = st
             break
 
     # Count — check both translated text and original (Ukrainian "БПЛА" doesn't inflect for plural)
     # Priority: range > explicit digit > UA word > EN word > at-least > group > plural > 1
-    combined = text + " " + raw_text
+    combined = corpus
     mr = _RANGE_RE.search(combined)
     m  = COUNT_RE.search(combined)
     mw = _UA_NUM_RE.search(combined.lower())

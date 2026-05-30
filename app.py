@@ -3159,7 +3159,7 @@ TO_RE = re.compile(
     re.I,
 )
 COUNT_RE = re.compile(
-    r"(\d+)\s*(?:ворожих\s+|атакуючих\s+|enemy\s+|hostile\s+)?"
+    r"(\d+)\s*[×xхХ]?\s*(?:ворожих\s+|атакуючих\s+|enemy\s+|hostile\s+)?"
     r"(?:шахед|бпла|бпл|ракет|дрон|калібр|кинджал|каб|фаб|"
     r"uav|uavs|drone|drones|missile|missiles|kar|kab|kabs|cab|cabs|fab|fabs)",
     re.I,

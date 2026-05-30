@@ -200,7 +200,8 @@ function _patrolRoute(lat, lon) {
 // Arrange N markers in a line perpendicular to direction of travel
 function _formationOffsets(count, bearingDeg) {
   if (count <= 1) return [[0, 0]];
-  const SPACING = 0.055;  // ~6 km between each unit
+  // Tighter spacing for large formations so they don't span the whole screen
+  const SPACING = count <= 4 ? 0.050 : count <= 8 ? 0.035 : 0.025;
   const perpRad = (bearingDeg + 90) * Math.PI / 180;
   const half = (count - 1) / 2;
   const offsets = [];
@@ -233,7 +234,7 @@ function addThreat(evt) {
   // not from the full list of all mentioned locations (which causes random diagonal animation)
   const wps  = (evt.waypoints || []).slice(0, 1).filter(w => w.lat && w.lon);
   const def  = THREATS[evt.type] || THREATS.unknown;
-  const count = Math.min(evt.count || 1, 6);
+  const count = Math.min(evt.count || 1, 16);
 
   // Initial bearing from text direction, or last waypoint segment, or default south
   let brg = evt.direction != null ? evt.direction : 180;

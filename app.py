@@ -3673,7 +3673,7 @@ async def _telegram_loop(cfg: dict) -> None:
 
     for slug, ent in entity_objs.items():
         try:
-            msgs = await client.get_messages(ent, limit=100)
+            msgs = await client.get_messages(ent, limit=300)
         except Exception as e:
             log.warning("history fetch error %s: %s", slug, e)
             continue

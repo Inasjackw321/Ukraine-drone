@@ -3794,6 +3794,15 @@ async def _telegram_loop(cfg: dict) -> None:
 def _run_telegram(cfg: dict) -> None:
     loop = asyncio.new_event_loop()
     asyncio.set_event_loop(loop)
+    # Suppress WinError 10054 / ConnectionResetError noise from ProactorEventLoop.
+    # These happen when Telegram's servers reset the TCP connection (e.g. DC migration)
+    # and are not actionable — Telethon reconnects automatically.
+    def _exc_handler(lp, context):
+        exc = context.get("exception")
+        if isinstance(exc, (ConnectionResetError, ConnectionAbortedError, OSError)):
+            return
+        lp.default_exception_handler(context)
+    loop.set_exception_handler(_exc_handler)
     try:
         loop.run_until_complete(_telegram_loop(cfg))
     except Exception as e:

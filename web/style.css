@@ -120,6 +120,51 @@ header {
   display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
 .item-ch   { font-size: 9px; color: #60a5fa; margin-top: 3px; }
 
+/* ── Feed tabs ───────────────────────────────────────────────────────────── */
+#feed-tabs {
+  display: flex; border-bottom: 1px solid var(--border);
+  flex-shrink: 0;
+}
+.tab-btn {
+  flex: 1; background: transparent; border: none;
+  color: var(--muted); padding: 7px 0; font-size: 10px;
+  font-weight: 700; letter-spacing: 1.5px; cursor: pointer;
+  transition: color .15s; border-bottom: 2px solid transparent;
+}
+.tab-btn:hover { color: #60a5fa; }
+.tab-btn.active { color: #60a5fa; border-bottom-color: #60a5fa; }
+
+#feed-raw {
+  flex: 1; overflow-y: auto; padding: 2px 0;
+  scrollbar-width: thin; scrollbar-color: var(--border) transparent;
+}
+
+.raw-item {
+  padding: 8px 12px;
+  border-bottom: 1px solid var(--border);
+  border-left: 3px solid transparent;
+  animation: slideIn .2s ease;
+}
+.r-plotted   { border-left-color: #22c55e; }
+.r-unplotted { border-left-color: #475569; }
+
+.raw-ch   { font-size: 9px; font-weight: 700; color: #60a5fa; text-transform: uppercase; letter-spacing: 1px; margin-right: 6px; }
+.raw-time { font-size: 9px; color: var(--muted); }
+.raw-text { font-size: 10px; color: var(--text); line-height: 1.4; margin-top: 4px;
+  display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; overflow: hidden; }
+
+/* ── Empty state ─────────────────────────────────────────────────────────── */
+#no-threats {
+  position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%);
+  background: rgba(11,15,21,.85); border: 1px solid var(--border);
+  border-radius: 10px; padding: 18px 28px; font-size: 13px;
+  color: var(--muted); text-align: center; pointer-events: none;
+  backdrop-filter: blur(6px); z-index: 500;
+}
+
+/* ── Marker opacity fade transition ──────────────────────────────────────── */
+.leaflet-marker-icon { transition: opacity 1s ease; }
+
 /* ── Legend ──────────────────────────────────────────────────────────────── */
 #legend {
   position: fixed; bottom: 20px; right: 16px;

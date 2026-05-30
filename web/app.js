@@ -6,7 +6,8 @@
 const THREATS = {
   shahed:    { label: 'Shahed',    color: '#f97316', glow: '#f97316', speed: 150,  cat: 'drone'   },
   geran:     { label: 'Geranium',  color: '#f97316', glow: '#f97316', speed: 150,  cat: 'drone'   },
-  drone:     { label: 'БПЛА',      color: '#60a5fa', glow: '#3b82f6', speed: 150,  cat: 'drone'   },
+  drone:     { label: 'UAV',      color: '#60a5fa', glow: '#3b82f6', speed: 150,  cat: 'drone'   },
+  kar:       { label: 'KAR',       color: '#fb923c', glow: '#ea580c', speed: 200,  cat: 'drone'   },
   kalibr:    { label: 'Kalibr',    color: '#ef4444', glow: '#dc2626', speed: 700,  cat: 'missile' },
   x101:      { label: 'X-101',     color: '#f87171', glow: '#ef4444', speed: 780,  cat: 'missile' },
   x59:       { label: 'X-59',      color: '#fb923c', glow: '#ea580c', speed: 900,  cat: 'missile' },
@@ -17,6 +18,7 @@ const THREATS = {
   ballistic: { label: 'Ballistic', color: '#eab308', glow: '#ca8a04', speed: 1200, cat: 'missile' },
   missile:   { label: 'Missile',   color: '#ef4444', glow: '#dc2626', speed: 700,  cat: 'missile' },
   unknown:   { label: 'Unknown',   color: '#94a3b8', glow: '#64748b', speed: 300,  cat: 'unknown' },
+  aviation:  { label: 'Aviation',  color: '#38bdf8', glow: '#0ea5e9', speed: 800,  cat: 'aviation' },
 };
 
 const STATUS_CLASS = {
@@ -27,11 +29,10 @@ const STATUS_CLASS = {
 // 1 degree latitude ≈ 111 km — used to convert km/h to deg/ms
 const DEG_PER_KM = 1 / 111;
 
-// Animation: time to traverse all known waypoints before extrapolating
-const WAYPOINT_TRAVERSE_MS = 22_000;  // 22 seconds
-
 // Threat expires after this long (disappears from map)
-const EXPIRE_MS = 45 * 60 * 1000;
+const EXPIRE_MS = 30 * 60 * 1000;
+// Cap how far back in time we extrapolate position on load (avoids huge jumps)
+const MAX_EXTRAP_MS = 3 * 60 * 1000;
 
 // ── Map ───────────────────────────────────────────────────────────────────
 const map = L.map('map', {
@@ -41,11 +42,11 @@ const map = L.map('map', {
 L.control.zoom({ position: 'topright' }).addTo(map);
 
 // Tiles are proxied through localhost so they load inside pywebview without
-// any CORS/CSP issues. The server fetches from CartoDB and caches them.
+// any CORS/CSP issues. The server fetches from CartoDB/OSM and caches them.
 L.tileLayer('/tiles/{z}/{x}/{y}.png', {
   maxZoom: 18,
-  // Fallback to CartoDB directly if the proxy fails (browser mode)
-  errorTileUrl: 'https://a.basemaps.cartocdn.com/dark_matter_nolabels/0/0/0.png',
+  crossOrigin: true,
+  keepBuffer: 4,
 }).addTo(map);
 
 // Ukraine border outline
@@ -69,6 +70,7 @@ const SHAPES = {
   drone:   'M8,1 L15,14 L8,11 L1,14 Z',
   shahed:  'M8,1 L15,14 L8,11 L1,14 Z',
   geran:   'M8,1 L15,14 L8,11 L1,14 Z',
+  kar:     'M8,1 L15,14 L8,11 L1,14 Z',
   // cruise missiles: slim dart
   missile: 'M8,1 L13,15 L8,12 L3,15 Z',
   kalibr:  'M8,1 L13,15 L8,12 L3,15 Z',
@@ -81,7 +83,9 @@ const SHAPES = {
   // ballistic / iskander: teardrop
   iskander:  'M8,1 C12,1 14,7 14,12 C14,15 11,16 8,16 C5,16 2,15 2,12 C2,7 4,1 8,1 Z',
   ballistic: 'M8,1 C12,1 14,7 14,12 C14,15 11,16 8,16 C5,16 2,15 2,12 C2,7 4,1 8,1 Z',
-  unknown: 'M8,2 L14,14 L8,11 L2,14 Z',
+  unknown:  'M8,2 L14,14 L8,11 L2,14 Z',
+  // top-down aircraft silhouette
+  aviation: 'M8,0 L10,5 L16,6 L16,8 L10,8 L11,16 L8,14 L5,16 L6,8 L0,8 L0,6 L6,5 Z',
 };
 
 const RING_COLORS = {
@@ -89,20 +93,26 @@ const RING_COLORS = {
   alert:  '#facc15', destroyed: '#22c55e', unknown: '#64748b',
 };
 
-function makeIcon(type, status, bearingDeg) {
+function makeIcon(type, status, bearingDeg, count) {
   const def    = THREATS[type] || THREATS.unknown;
   const shape  = SHAPES[type]  || SHAPES.unknown;
   const ring   = RING_COLORS[status] || RING_COLORS.unknown;
   const isActive = status === 'moving' || status === 'launch' || status === 'alert';
   const pulse  = isActive ? 'style="animation:iconPulse 1.8s infinite"' : '';
-  const size   = type === 'kinzhal' ? 32 : (def.cat === 'missile' ? 28 : 26);
+  const size   = type === 'kinzhal' ? 48 : (def.cat === 'missile' ? 44 : 52);
+  const n = count > 1 ? count : 0;
 
   const svg = `
-    <svg width="${size}" height="${size}" viewBox="0 0 16 16"
-         style="transform:rotate(${bearingDeg}deg);filter:drop-shadow(0 0 4px ${def.glow}88)"
+    <svg width="${size}" height="${size}" viewBox="0 0 20 22"
+         style="transform:rotate(${bearingDeg}deg);filter:drop-shadow(0 0 5px ${def.glow}99)"
          ${pulse}>
-      <path d="${shape}" fill="${def.color}" opacity=".92"/>
-      <circle cx="8" cy="8" r="7" fill="none" stroke="${ring}" stroke-width="1.2" opacity=".7"/>
+      <g transform="scale(1.25) translate(0,-1)">
+        <path d="${shape}" fill="${def.color}" opacity=".93"/>
+        <circle cx="8" cy="8" r="7" fill="none" stroke="${ring}" stroke-width="1.3" opacity=".8"/>
+      </g>
+      ${n ? `<text x="10" y="21" text-anchor="middle" font-family="monospace"
+               font-size="5.5" font-weight="bold" fill="white"
+               stroke="#080c10" stroke-width="0.8">×${n}</text>` : ''}
     </svg>`;
 
   return L.divIcon({
@@ -143,87 +153,129 @@ function computeVelocity(waypoints, type) {
 // ── Popup ─────────────────────────────────────────────────────────────────
 function popup(evt) {
   const def  = THREATS[evt.type] || THREATS.unknown;
-  const time = new Date(evt.ts).toLocaleTimeString('uk-UA', { hour: '2-digit', minute: '2-digit' });
-  const from = evt.from ? `↗ From: ${evt.from}` : '';
-  const to   = evt.to   ? `🎯 To: ${evt.to}` : '';
+  const time = new Date(evt.ts).toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit', hour12: false });
+  const DIRS = {0:'N',45:'NE',90:'E',135:'SE',180:'S',225:'SW',270:'W',315:'NW'};
+  const dirLabel = evt.direction != null ? (DIRS[evt.direction] || `${evt.direction}°`) : null;
+  const count = evt.count || 1;
   return `
-    <div style="min-width:190px">
-      <b style="color:${def.color};font-size:13px">${def.label} × ${evt.count || 1}</b>
-      <div style="color:#64748b;font-size:10px;margin:3px 0 6px">${time} · ${evt.channel || ''}</div>
-      ${evt.location ? `<div>📍 ${evt.location}</div>` : ''}
-      ${from ? `<div style="color:#64748b;font-size:11px">${from}</div>` : ''}
-      ${to   ? `<div style="color:#64748b;font-size:11px">${to}</div>` : ''}
+    <div style="min-width:200px;font-family:monospace">
+      <b style="color:${def.color};font-size:13px">${def.label}${count > 1 ? ` ×${count}` : ''}</b>
+      <span style="margin-left:8px;padding:1px 5px;background:${def.color}22;color:${def.color};
+                   border-radius:3px;font-size:10px">${(evt.status||'unknown').toUpperCase()}</span>
+      <div style="color:#64748b;font-size:10px;margin:4px 0 6px">${time} UTC · ${evt.channel || ''}</div>
+      ${evt.location ? `<div style="margin-bottom:3px">📍 <b>${evt.location}</b></div>` : ''}
+      ${dirLabel     ? `<div style="color:#94a3b8;font-size:11px">🧭 Heading: <b style="color:#e2e8f0">${dirLabel}</b></div>` : ''}
+      ${evt.from     ? `<div style="color:#94a3b8;font-size:11px">↗ From: ${evt.from}</div>` : ''}
+      ${evt.to       ? `<div style="color:#94a3b8;font-size:11px">🎯 Toward: ${evt.to}</div>` : ''}
+      ${evt.waypoints && evt.waypoints.length > 1
+        ? `<div style="color:#64748b;font-size:10px;margin-top:3px">📌 ${evt.waypoints.map(w=>w.name).join(' → ')}</div>`
+        : ''}
       <div style="margin-top:7px;padding-top:6px;border-top:1px solid #1a2332;
                   font-size:10px;color:#64748b;line-height:1.45">
-        ${(evt.text || '').substring(0, 160)}${(evt.text||'').length > 160 ? '…' : ''}
+        ${(evt.text || '').substring(0, 200)}${(evt.text||'').length > 200 ? '…' : ''}
       </div>
     </div>`;
 }
 
 // ── Threat state ──────────────────────────────────────────────────────────
-const threats = new Map();  // id → { evt, marker, antPath, trails[], animFrame, cancelled }
+const threats = new Map();
+// seenIds: Map<id, timestamp> — expires after 35 min so server-restart history reloads correctly
+const seenIds = new Map();
+function hasSeen(id) { return seenIds.has(id); }
+function markSeen(id) { seenIds.set(id, Date.now()); }
+setInterval(() => {
+  const cutoff = Date.now() - 35 * 60 * 1000;
+  for (const [id, ts] of seenIds) if (ts < cutoff) seenIds.delete(id);
+}, 5 * 60 * 1000);
 let totalCount = 0;
+
+// Build a racetrack patrol loop centred on (lat,lon) for aviation threats
+function _patrolRoute(lat, lon) {
+  const w = 1.4, h = 0.35;   // ~155 km wide, ~40 km tall
+  return [
+    [lat + h,  lon - w],
+    [lat,      lon - w * 0.5],
+    [lat - h,  lon],
+    [lat,      lon + w * 0.5],
+    [lat + h,  lon + w],
+    [lat,      lon + w * 0.5],
+    [lat - h,  lon],
+    [lat,      lon - w * 0.5],
+  ];
+}
+
+// Arrange N markers in a line perpendicular to direction of travel
+function _formationOffsets(count, bearingDeg) {
+  if (count <= 1) return [[0, 0]];
+  const SPACING = 0.055;  // ~6 km between each unit
+  const perpRad = (bearingDeg + 90) * Math.PI / 180;
+  const half = (count - 1) / 2;
+  const offsets = [];
+  for (let i = 0; i < count; i++) {
+    const t = i - half;
+    offsets.push([Math.sin(perpRad) * SPACING * t, Math.cos(perpRad) * SPACING * t]);
+  }
+  return offsets;
+}
 
 function addThreat(evt) {
   if (!evt.lat || !evt.lon) return;
   if (threats.has(evt.id)) removeThreat(evt.id);
 
-  const wps = (evt.waypoints || []).filter(w => w.lat && w.lon);
+  const wps  = (evt.waypoints || []).filter(w => w.lat && w.lon);
   const def  = THREATS[evt.type] || THREATS.unknown;
+  const count = Math.min(evt.count || 1, 6);
 
-  // Initial bearing: from second-to-last → last waypoint (or default north)
-  let brg = 0;
-  if (wps.length >= 2) {
+  // Initial bearing from text direction, or last waypoint segment
+  let brg = evt.direction != null ? evt.direction : 0;
+  if (brg === 0 && wps.length >= 2) {
     const a = wps[wps.length - 2], b = wps[wps.length - 1];
     brg = bearing(a.lat, a.lon, b.lat, b.lon);
   }
 
-  // Marker
-  const marker = L.marker([evt.lat, evt.lon], {
-    icon: makeIcon(evt.type, evt.status, brg),
-    zIndexOffset: def.cat === 'missile' ? 1000 : 500,
-  });
-  marker.bindPopup(popup(evt), { maxWidth: 280 });
-  marker.addTo(layers.markers);
-
-  // Ant-path trajectory
-  let antPath = null;
+  const offsets = _formationOffsets(count, brg);
+  const markers = [];
   const trailLines = [];
+
+  offsets.forEach((off) => {
+    const lat = evt.lat + off[0], lon = evt.lon + off[1];
+    let m;
+    try {
+      m = L.marker([lat, lon], {
+        icon: makeIcon(evt.type, evt.status, brg, count),
+        zIndexOffset: def.cat === 'missile' ? 1000 : 500,
+      });
+    } catch(e) {
+      m = L.circleMarker([lat, lon], {
+        radius: 10, color: def.color, fillColor: def.color, fillOpacity: 0.85,
+      });
+    }
+    m.bindPopup(popup(evt), { maxWidth: 300 });
+    m.addTo(layers.markers);
+    markers.push(m);
+  });
+
+  // Waypoint trail only (no forward-projection line — it caused cross-Ukraine artifacts)
   if (wps.length >= 2) {
-    const lls = wps.map(w => [w.lat, w.lon]);
-    antPath = L.polyline.antPath(lls, {
-      delay: 600, dashArray: [8, 16], weight: 2,
-      color: def.color, pulseColor: '#fff',
-      hardwareAccelerated: true,
-    }).addTo(layers.paths);
-
-    // Faint historical trail
-    trailLines.push(L.polyline(lls, {
-      color: def.color, weight: 1.2, opacity: 0.18, dashArray: '3 8',
-    }).addTo(layers.trails));
-
-    // Projected path ahead
-    const vel = computeVelocity(wps, evt.type);
-    const msLeft = EXPIRE_MS - (Date.now() - new Date(evt.ts).getTime());
-    const projEnd = {
-      lat: wps[wps.length-1].lat + vel.dLat * Math.max(msLeft, 10_000),
-      lon: wps[wps.length-1].lon + vel.dLon * Math.max(msLeft, 10_000),
-    };
-    trailLines.push(L.polyline(
-      [[wps[wps.length-1].lat, wps[wps.length-1].lon], [projEnd.lat, projEnd.lon]],
-      { color: def.color, weight: 1, opacity: 0.10, dashArray: '2 12' }
-    ).addTo(layers.trails));
+    trailLines.push(L.polyline(wps.map(w => [w.lat, w.lon]), {
+      color: def.color, weight: 2, opacity: 0.5, dashArray: '5 9',
+    }).addTo(layers.paths));
   }
 
-  const obj = { evt, marker, antPath, trailLines, animFrame: null, cancelled: false };
+  const obj = { evt, markers, marker: markers[0], trailLines, cancelled: false };
   threats.set(evt.id, obj);
 
-  // Animate
   if (evt.status !== 'destroyed') {
-    _animate(obj, wps);
+    if (evt.type === 'aviation') {
+      _animatePatrol(obj);
+    } else {
+      offsets.forEach((off, i) => {
+        const offsetWps = wps.map(w => ({ lat: w.lat + off[0], lon: w.lon + off[1], name: w.name }));
+        _animateMarker(obj, markers[i], offsetWps, evt);
+      });
+    }
   }
 
-  // Auto-expire
   const ttl = EXPIRE_MS - (Date.now() - new Date(evt.ts).getTime());
   setTimeout(() => removeThreat(evt.id), Math.max(ttl, 5000));
   updateStats();
@@ -233,65 +285,124 @@ function removeThreat(id) {
   const obj = threats.get(id);
   if (!obj) return;
   obj.cancelled = true;
-  if (obj.animFrame) cancelAnimationFrame(obj.animFrame);
-  layers.markers.removeLayer(obj.marker);
-  if (obj.antPath) layers.paths.removeLayer(obj.antPath);
-  obj.trailLines.forEach(l => layers.trails.removeLayer(l));
+  (obj.markers || (obj.marker ? [obj.marker] : [])).forEach(m => layers.markers.removeLayer(m));
+  obj.trailLines.forEach(l => {
+    layers.paths.removeLayer(l);
+    layers.trails.removeLayer(l);
+  });
   threats.delete(id);
   updateStats();
 }
 
-// ── Animation ─────────────────────────────────────────────────────────────
-function _animate(obj, wps) {
-  if (wps.length < 2) return;
+// ── Patrol animation (aviation — loops forever) ───────────────────────────
+function _animatePatrol(obj) {
+  const { evt } = obj;
+  const marker = (obj.markers && obj.markers[0]) || obj.marker;
+  const route   = _patrolRoute(evt.lat, evt.lon);
+  const speedMs = (THREATS[evt.type] || THREATS.aviation).speed * DEG_PER_KM / 3_600_000;
 
-  const { evt, marker } = obj;
-  const segs      = wps.length - 1;
-  const segMs     = WAYPOINT_TRAVERSE_MS / segs;
-  const vel       = computeVelocity(wps, evt.type);
-
-  // Phase 1: traverse waypoints
-  function animSeg(si, t0) {
+  function step(si, t0) {
     if (obj.cancelled || !threats.has(evt.id)) return;
-    const from = wps[si], to = wps[si + 1];
-    const t    = Math.min((performance.now() - t0) / segMs, 1);
-    const ease = t < .5 ? 2*t*t : -1 + (4 - 2*t)*t;
+    const fi   = si % route.length;
+    const ti   = (si + 1) % route.length;
+    const from = route[fi], to = route[ti];
+    const dist = Math.hypot(to[0] - from[0], to[1] - from[1]);
+    const segMs = dist / speedMs;
+    const t = Math.min((performance.now() - t0) / segMs, 1);
 
-    const lat = from.lat + (to.lat - from.lat) * ease;
-    const lon = from.lon + (to.lon - from.lon) * ease;
-    marker.setLatLng([lat, lon]);
+    marker.setLatLng([
+      from[0] + (to[0] - from[0]) * t,
+      from[1] + (to[1] - from[1]) * t,
+    ]);
+    marker.setIcon(makeIcon(evt.type, evt.status, bearing(from[0], from[1], to[0], to[1])));
 
-    // Update icon bearing at segment boundaries
-    const brg = bearing(from.lat, from.lon, to.lat, to.lon);
-    if (t >= 0.98) marker.setIcon(makeIcon(evt.type, evt.status, brg));
-
-    if (t < 1) {
-      obj.animFrame = requestAnimationFrame(() => animSeg(si, t0));
-    } else if (si < segs - 1) {
-      animSeg(si + 1, performance.now());
+    if (t >= 1) {
+      step(si + 1, performance.now());
     } else {
-      // Phase 2: extrapolate at real weapon speed
-      const finalBrg = bearing(wps[segs-1].lat, wps[segs-1].lon, wps[segs].lat, wps[segs].lon);
-      marker.setIcon(makeIcon(evt.type, evt.status, finalBrg));
-      _extrapolate(obj, wps[segs], vel);
+      obj.animFrame = requestAnimationFrame(() => step(si, t0));
     }
   }
-
-  animSeg(0, performance.now());
+  step(0, performance.now());
 }
 
-// Phase 2: continue in same direction at physics speed indefinitely
-function _extrapolate(obj, origin, vel) {
-  if (obj.cancelled || !threats.has(obj.evt.id)) return;
-  const t0 = performance.now();
+// ── Animation ─────────────────────────────────────────────────────────────
+// Compute current real-world position from elapsed time, then animate forward.
+// Elapsed time is capped at MAX_EXTRAP_MS so old events don't jump far.
+function _animateMarker(obj, marker, wps, evt) {
+  const def = THREATS[evt.type] || THREATS.unknown;
+  const speedDegMs = def.speed * DEG_PER_KM / 3_600_000;
 
+  const elapsedMs = Math.min(
+    Math.max(0, Date.now() - new Date(evt.ts).getTime()),
+    MAX_EXTRAP_MS
+  );
+
+  const cardinalBrg = evt.direction != null ? evt.direction : null;
+
+  let extrapVel;
+  if (cardinalBrg != null) {
+    const rad = cardinalBrg * Math.PI / 180;
+    extrapVel = { dLat: Math.cos(rad) * speedDegMs, dLon: Math.sin(rad) * speedDegMs };
+  } else if (wps.length >= 2) {
+    extrapVel = computeVelocity(wps, evt.type);
+  } else {
+    extrapVel = { dLat: 0, dLon: 0 };
+  }
+
+  let curLat, curLon, curBrg;
+  if (wps.length >= 2) {
+    let distLeft = speedDegMs * elapsedMs;
+    curLat = wps[0].lat; curLon = wps[0].lon;
+    curBrg = bearing(wps[0].lat, wps[0].lon, wps[1].lat, wps[1].lon);
+    let pastEnd = true;
+    for (let i = 0; i < wps.length - 1; i++) {
+      const a = wps[i], b = wps[i + 1];
+      const segDist = Math.hypot(b.lat - a.lat, b.lon - a.lon);
+      curBrg = bearing(a.lat, a.lon, b.lat, b.lon);
+      if (distLeft <= segDist) {
+        const t = distLeft / segDist;
+        curLat = a.lat + (b.lat - a.lat) * t;
+        curLon = a.lon + (b.lon - a.lon) * t;
+        distLeft = 0; pastEnd = false; break;
+      }
+      distLeft -= segDist;
+      curLat = b.lat; curLon = b.lon;
+    }
+    if (pastEnd && distLeft > 0) {
+      const extraMs = distLeft / speedDegMs;
+      curLat += extrapVel.dLat * extraMs;
+      curLon += extrapVel.dLon * extraMs;
+    }
+  } else {
+    const origin = wps[0] || { lat: evt.lat, lon: evt.lon };
+    curLat = origin.lat + extrapVel.dLat * elapsedMs;
+    curLon = origin.lon + extrapVel.dLon * elapsedMs;
+    curBrg = cardinalBrg != null ? cardinalBrg : 0;
+  }
+
+  if (cardinalBrg != null) curBrg = cardinalBrg;
+
+  marker.setLatLng([curLat, curLon]);
+  marker.setIcon(makeIcon(evt.type, evt.status, curBrg));
+
+  if (extrapVel.dLat !== 0 || extrapVel.dLon !== 0) {
+    _extrapolateMarker(obj, marker, { lat: curLat, lon: curLon }, extrapVel, curBrg);
+  }
+}
+
+// Continue moving at constant physics speed until marker is cancelled
+function _extrapolateMarker(obj, marker, origin, vel, brg) {
+  if (obj.cancelled || !threats.has(obj.evt.id)) return;
+  const { evt } = obj;
+  const t0 = performance.now();
   function step() {
     if (obj.cancelled || !threats.has(obj.evt.id)) return;
-    const el  = performance.now() - t0;
-    obj.marker.setLatLng([origin.lat + vel.dLat * el, origin.lon + vel.dLon * el]);
-    obj.animFrame = requestAnimationFrame(step);
+    const el = performance.now() - t0;
+    marker.setLatLng([origin.lat + vel.dLat * el, origin.lon + vel.dLon * el]);
+    if (brg != null) marker.setIcon(makeIcon(evt.type, evt.status, brg));
+    requestAnimationFrame(step);
   }
-  step();
+  requestAnimationFrame(step);
 }
 
 // ── Stats ─────────────────────────────────────────────────────────────────
@@ -304,12 +415,27 @@ function updateStats() {
   document.getElementById('c-total').textContent     = totalCount;
   document.getElementById('c-active').textContent    = active;
   document.getElementById('c-destroyed').textContent = destroyed;
+  const nt = document.getElementById('no-threats');
+  if (nt) nt.style.display = threats.size === 0 ? 'flex' : 'none';
 }
+
+// Age-based opacity fading — runs every 30 s
+setInterval(() => {
+  const now = Date.now();
+  for (const [, obj] of threats) {
+    const age = now - new Date(obj.evt.ts).getTime();
+    const op  = age < 5 * 60_000 ? 1 : age < 15 * 60_000 ? 0.65 : 0.35;
+    (obj.markers || (obj.marker ? [obj.marker] : [])).forEach(m => {
+      const el = m.getElement();
+      if (el) el.style.opacity = op;
+    });
+  }
+}, 30_000);
 
 // ── Feed ──────────────────────────────────────────────────────────────────
 function addFeedItem(evt) {
   const def  = THREATS[evt.type] || THREATS.unknown;
-  const time = new Date(evt.ts).toLocaleTimeString('uk-UA', { hour:'2-digit', minute:'2-digit' });
+  const time = new Date(evt.ts).toLocaleTimeString('en-US', { hour:'2-digit', minute:'2-digit' });
   const sCls = STATUS_CLASS[evt.status] || 's-unknown';
 
   const el = document.createElement('div');
@@ -413,9 +539,12 @@ function connect() {
 }
 
 function handleEvent(evt) {
+  if (!evt || !evt.id || hasSeen(evt.id)) return;
+  markSeen(evt.id);
   totalCount++;
-  addThreat(evt);
-  addFeedItem(evt);
+  try { addThreat(evt); } catch(e) { console.error('addThreat', e, evt); }
+  try { addFeedItem(evt); } catch(e) { console.error('addFeedItem', e, evt); }
+  updateStats();
 }
 
 function setConn(state) {
@@ -425,8 +554,82 @@ function setConn(state) {
   txt.textContent = { connecting: 'Connecting…', live: 'Connected', error: 'Reconnecting…' }[state];
 }
 
+// ── HTTP polling — XMLHttpRequest instead of fetch() for pywebview compat ──
+function pollEvents() {
+  const xhr = new XMLHttpRequest();
+  xhr.onreadystatechange = function() {
+    if (xhr.readyState !== 4) return;
+    if (xhr.status === 200) {
+      try {
+        const data = JSON.parse(xhr.responseText);
+        const evts = data.events || [];
+        if (evts.length > 0) {
+          document.getElementById('conn-txt').textContent = 'Live · ' + evts.length + ' event' + (evts.length === 1 ? '' : 's');
+          document.getElementById('conn-dot').className = 'dot live';
+        }
+        evts.forEach(handleEvent);
+      } catch(e) {
+        document.getElementById('conn-txt').textContent = 'Parse error';
+      }
+    } else if (xhr.status !== 0) {
+      document.getElementById('conn-txt').textContent = 'Poll error ' + xhr.status;
+    }
+    setTimeout(pollEvents, 3000);
+  };
+  xhr.onerror = function() {
+    document.getElementById('conn-txt').textContent = 'XHR error – retrying';
+    setTimeout(pollEvents, 3000);
+  };
+  xhr.open('GET', window.location.origin + '/api/events', true);
+  xhr.send();
+}
+
+// ── RAW message feed tab ──────────────────────────────────────────────────
+let rawTab = false;
+
+document.querySelectorAll('.tab-btn').forEach(btn => {
+  btn.addEventListener('click', () => {
+    document.querySelectorAll('.tab-btn').forEach(b => b.classList.remove('active'));
+    btn.classList.add('active');
+    rawTab = btn.dataset.tab === 'raw';
+    document.getElementById('feed').style.display    = rawTab ? 'none' : '';
+    document.getElementById('feed-raw').style.display = rawTab ? '' : 'none';
+  });
+});
+
+function pollRawMessages() {
+  const xhr = new XMLHttpRequest();
+  xhr.onreadystatechange = function() {
+    if (xhr.readyState !== 4 || xhr.status !== 200) return;
+    try {
+      const msgs = JSON.parse(xhr.responseText).messages || [];
+      const el = document.getElementById('feed-raw');
+      if (!el) return;
+      el.innerHTML = '';
+      msgs.forEach(msg => {
+        const time = new Date(msg.ts).toLocaleTimeString('en-US',
+          { hour: '2-digit', minute: '2-digit', hour12: false });
+        const div = document.createElement('div');
+        div.className = 'raw-item ' + (msg.plotted ? 'r-plotted' : 'r-unplotted');
+        div.innerHTML = `<div class="raw-header">
+          <span class="raw-ch">${msg.channel}</span>
+          <span class="raw-time">${time}</span>
+          ${msg.plotted ? '<span class="raw-badge">PLOTTED</span>' : ''}
+        </div>
+        <div class="raw-text">${(msg.text || '').substring(0, 300)}</div>`;
+        el.appendChild(div);
+      });
+    } catch(e) {}
+  };
+  xhr.open('GET', window.location.origin + '/api/messages', true);
+  xhr.send();
+}
+
 // ── Boot ──────────────────────────────────────────────────────────────────
 connect();
+pollEvents();
+pollRawMessages();
+setInterval(pollRawMessages, 30_000);
 setInterval(() => {
   const now = Date.now();
   for (const [id, o] of threats)

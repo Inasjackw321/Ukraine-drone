@@ -72,11 +72,17 @@
     <button class="f" data-f="destroyed">Destroyed</button>
   </div>
 
-  <div id="feed-head">LIVE FEED</div>
+  <div id="feed-tabs">
+    <button class="tab-btn active" data-tab="live">LIVE FEED</button>
+    <button class="tab-btn" data-tab="raw">RAW</button>
+  </div>
   <div id="feed"></div>
+  <div id="feed-raw" style="display:none"></div>
 </aside>
 
-<div id="map"></div>
+<div id="map">
+  <div id="no-threats" style="display:none">No active threats in the last 30 minutes</div>
+</div>
 
 <div id="legend">
   <div class="leg-row"><svg viewBox="0 0 16 16" class="leg-icon"><polygon points="8,1 15,15 8,11 1,15" fill="#f97316"/></svg> Shahed / Drone</div>

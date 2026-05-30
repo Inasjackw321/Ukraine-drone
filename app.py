@@ -466,6 +466,13 @@ LOCS: dict[str, tuple[float, float]] = {
     "kharkov":           (49.99, 36.23),  "kiev":             (50.45, 30.52),
     "dnepropetrovsk":    (48.46, 35.05),  "dniepropetrovsk":  (48.46, 35.05),
     "lugansk":           (48.57, 39.31),  "donetsk":          (48.02, 37.80),
+    # English cities frequently mentioned as war_monitor destinations
+    "snovsk":            (51.83, 31.95),  # Сновськ, Chernihiv oblast
+    "semenivka":         (52.18, 32.57),  # Семенівка, Chernihiv oblast
+    "vasylivka":         (47.44, 35.29),  # Василівка, Zaporizhzhia oblast
+    "novhorod-siverskyi":(51.99, 33.26),  "novhorod siverskyi":(51.99, 33.26),
+    "buryn":             (51.20, 33.79),  "krasnopillia":     (50.99, 35.20),
+    "dvorichna":         (49.85, 37.71),
 
     # ── Donetsk region – additional towns ────────────────────────────────────
     "волноваха":         (47.60, 37.50),  "волновасі":        (47.60, 37.50),
@@ -914,9 +921,10 @@ THREAT_RE: list[tuple[re.Pattern, str]] = [
     (re.compile(r"онікс|oniks",              re.I), "oniks"),
     (re.compile(r"калібр|kalibr|caliber",   re.I), "kalibr"),
     # Glide bombs — КАБ / ФАБ+УМПК (high priority, before generic "bomb/ракет")
+    # kabs/cabs/fabs = plural slang used in English reports ("3 Cabs near Zaporizhzhia")
     (re.compile(
-        r"каб-\d+|каб\b|kab-\d+|\bkab\b|"
-        r"фаб-\d+|фаб\b|fab-\d+|\bfab\b|умпк|umpk|"
+        r"каб-\d+|каб\b|kab-\d+|\bkabs?\b|\bcabs?\b|"
+        r"фаб-\d+|фаб\b|fab-\d+|\bfabs?\b|умпк|umpk|"
         r"керован[аі]\s+авіабомб|glide\s*bomb|guided\s*bomb|guided\s*aerial",
         re.I), "glidebomb"),
     (re.compile(r"шахед|shaheed|shahed",    re.I), "shahed"),
@@ -967,11 +975,36 @@ TO_RE = re.compile(
     re.I,
 )
 COUNT_RE = re.compile(
-    r"(\d+)\s*(?:шахед|бпла|бпл|ракет|дрон|калібр|кинджал|каб|фаб|uav|uavs|drone|drones|missile|missiles|kar|kab|fab)",
+    r"(\d+)\s*(?:ворожих\s+|атакуючих\s+|enemy\s+|hostile\s+)?"
+    r"(?:шахед|бпла|бпл|ракет|дрон|калібр|кинджал|каб|фаб|"
+    r"uav|uavs|drone|drones|missile|missiles|kar|kab|kabs|cab|cabs|fab|fabs)",
+    re.I,
+)
+# Range like "4-6 drones" — take upper bound
+_RANGE_RE = re.compile(
+    r"(\d+)\s*[-–—]\s*(\d+)\s*(?:шахед|бпла|дрон|ракет|uav|uavs|drone|drones|missile|missiles)",
+    re.I,
+)
+# "more than 5" / "at least 3" / "over 10" / "5+"
+_AT_LEAST_RE = re.compile(
+    r"(?:more\s+than|at\s+least|over|не\s+менше|понад|більше\s+(?:ніж\s+)?)\s*(\d+)"
+    r"|(\d+)\s*\+",
     re.I,
 )
 GROUP_RE = re.compile(
-    r"груп[аиі]|кількох|декількох|декілька|кілька|кільком|group|several|multiple",
+    r"груп[аиіою]|кількох|декількох|декілька|кілька|кільком|кількома"
+    r"|масован\w+|масштабн\w+|хвил[яі]|хвилею"
+    r"|group|several|multiple|swarm|wave|mass\s+(?:attack|launch|strike)",
+    re.I,
+)
+# Bare plural noun with no preceding number — implies ≥2
+_PLURAL_RE = re.compile(
+    r"\b(?:uavs|drones|missiles|rockets|shaheds|geraniums|kabs|cabs|fabs|"
+    r"бпла(?:ми|х|ів)|бпла-[а-яa-z]+(?:ів|и)?"
+    r"|ударних\s+бпла|атакуючих\s+бпла|барражуючих\s+бпла"
+    r"|дрони|дронів|дронами|ракети|ракетами|ракетах"
+    r"|шахеди|шахедів|шахедами|крилаті\s+ракети"
+    r"|літаки|гелікоптери|об'єкти|targets)\b",
     re.I,
 )
 
@@ -992,6 +1025,19 @@ _UA_NUMS: dict[str, int] = {
 _UA_NUM_RE = re.compile(
     r"\b(" + "|".join(re.escape(k) for k in sorted(_UA_NUMS, key=len, reverse=True)) + r")\b"
     r"\s*(?:шахед|бпла|дрон|ракет|kalibr|uav|uavs|drone|drones|missile|missiles|kar)",
+    re.I,
+)
+
+# English number words → integer
+_EN_NUMS: dict[str, int] = {
+    "one": 1, "two": 2, "three": 3, "four": 4, "five": 5,
+    "six": 6, "seven": 7, "eight": 8, "nine": 9, "ten": 10,
+    "eleven": 11, "twelve": 12, "dozen": 12, "thirteen": 13,
+    "fourteen": 14, "fifteen": 15, "sixteen": 16, "twenty": 20,
+}
+_EN_NUM_RE = re.compile(
+    r"\b(" + "|".join(re.escape(k) for k in sorted(_EN_NUMS, key=len, reverse=True)) + r")\b"
+    r"\s*(?:uav|uavs|drone|drones|missile|missiles|shahed|rocket|rockets|aircraft|kab|kabs|fab|fabs)",
     re.I,
 )
 
@@ -1085,7 +1131,14 @@ _OBLAST_HINT_RE = re.compile(
 )
 
 
-def parse_message(text: str, channel: str, msg_id: int = 0, msg_date=None) -> dict | None:
+def _det_count(seed: str, lo: int, hi: int) -> int:
+    """Deterministic count in [lo,hi] based on message text — stable across restarts."""
+    import hashlib
+    h = int(hashlib.md5(seed.encode('utf-8', errors='replace')).hexdigest(), 16)
+    return lo + (h % (hi - lo + 1))
+
+
+def parse_message(text: str, channel: str, msg_id: int = 0, msg_date=None, raw_text: str = "") -> dict | None:
     if not text or len(text) < 10:
         return None
 
@@ -1095,6 +1148,11 @@ def parse_message(text: str, channel: str, msg_id: int = 0, msg_date=None) -> di
         if pat.search(text):
             threat = name
             break
+
+    # Generic air-alert with no weapon ID — goes to feed only, not the map
+    if threat == "unknown":
+        log.debug("[%s] GENERIC ALERT (no weapon ID): %.80s", channel, text.replace("\n", " "))
+        return None
 
     locs = find_locations(text)
 
@@ -1116,22 +1174,46 @@ def parse_message(text: str, channel: str, msg_id: int = 0, msg_date=None) -> di
             status = st
             break
 
-    # Count
-    m = COUNT_RE.search(text)
-    if m:
+    # Count — check both translated text and original (Ukrainian "БПЛА" doesn't inflect for plural)
+    # Priority: range > explicit digit > UA word > EN word > at-least > group > plural > 1
+    combined = text + " " + raw_text
+    mr = _RANGE_RE.search(combined)
+    m  = COUNT_RE.search(combined)
+    mw = _UA_NUM_RE.search(combined.lower())
+    me = _EN_NUM_RE.search(text.lower())
+    ma = _AT_LEAST_RE.search(combined)
+    if mr:
+        count = int(mr.group(2))
+    elif m:
         count = int(m.group(1))
+    elif mw:
+        count = _UA_NUMS.get(mw.group(1), 1)
+    elif me:
+        count = _EN_NUMS.get(me.group(1).lower(), 1)
+    elif ma:
+        n = ma.group(1) or ma.group(2)
+        count = int(n) + 1 if ma.group(1) else int(n)
+    elif GROUP_RE.search(combined):
+        count = _det_count(text[:40], 4, 8)
+    elif _PLURAL_RE.search(combined):
+        count = _det_count(text[:40], 2, 4)
     else:
-        mw = _UA_NUM_RE.search(text.lower())
-        if mw:
-            count = _UA_NUMS.get(mw.group(1), 1)
-        elif GROUP_RE.search(text):
-            count = random.randint(4, 10)
-        else:
-            count = 1
+        count = 1
 
     # Directions (named from/to locations)
     frm = (FROM_RE.search(text) or type("", (), {"group": lambda s, i: None})()).group(1)
     to  = (TO_RE.search(text)   or type("", (), {"group": lambda s, i: None})()).group(1)
+
+    # Resolve destination coordinates for animation heading
+    to_lat, to_lon = None, None
+    if to:
+        to_key = to.lower().strip()
+        if to_key in LOCS:
+            to_lat, to_lon = LOCS[to_key]
+        else:
+            hm2 = _OBLAST_HINT_RE.search(to_key)
+            if hm2:
+                to_lat, to_lon = OBLAST_HINTS[hm2.group().lower()]
 
     # Cardinal travel direction — checked travel keywords first, then origin (reversed)
     direction_deg = None
@@ -1158,6 +1240,8 @@ def parse_message(text: str, channel: str, msg_id: int = 0, msg_date=None) -> di
         "count":     count,
         "from":      frm,
         "to":        to,
+        "to_lat":    to_lat,
+        "to_lon":    to_lon,
         "direction": direction_deg,
         "lat":       primary["lat"] if primary else None,
         "lon":       primary["lon"] if primary else None,
@@ -1397,13 +1481,13 @@ async def _telegram_loop(cfg: dict) -> None:
         segments = split_segments(text) or [text]
         any_plotted = False
         for i, seg in enumerate(segments):
-            evt = parse_message(seg, slug, msg.id, msg_date=msg_date)
+            evt = parse_message(seg, slug, msg.id, msg_date=msg_date, raw_text=raw)
             if not evt:
                 continue
             waypoints = evt.get("waypoints", [])
             if len(waypoints) <= 1:
                 evt["id"] = f"{msg.id}_{i}_0"
-                log.info("[%s] %-10s  %s", slug, evt["type"], evt.get("location", "?"))
+                log.info("[%s] %-10s  ×%-2d  %s", slug, evt["type"], evt.get("count", 1), evt.get("location", "?"))
                 push_event(evt)
                 any_plotted = True
             else:

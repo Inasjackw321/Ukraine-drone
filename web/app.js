@@ -248,9 +248,9 @@ function addThreat(evt) {
   const def  = THREATS[evt.type] || THREATS.unknown;
   const count = Math.min(evt.count || 1, 6);
 
-  // Initial bearing from text direction, or last waypoint segment
-  let brg = evt.direction != null ? evt.direction : 0;
-  if (brg === 0 && wps.length >= 2) {
+  // Initial bearing from text direction, or last waypoint segment, or default south
+  let brg = evt.direction != null ? evt.direction : 180;
+  if (brg === 180 && wps.length >= 2) {
     const a = wps[wps.length - 2], b = wps[wps.length - 1];
     brg = bearing(a.lat, a.lon, b.lat, b.lon);
   }
@@ -282,6 +282,14 @@ function addThreat(evt) {
     trailLines.push(L.polyline(wps.map(w => [w.lat, w.lon]), {
       color: def.color, weight: 2, opacity: 0.5, dashArray: '5 9',
     }).addTo(layers.paths));
+  }
+
+  // Faint forecast line from detection point toward named destination
+  if (evt.to_lat && evt.to_lon) {
+    trailLines.push(L.polyline(
+      [[evt.lat, evt.lon], [evt.to_lat, evt.to_lon]],
+      { color: def.color, weight: 1, opacity: 0.35, dashArray: '3 8' }
+    ).addTo(layers.paths));
   }
 
   const obj = { evt, markers, marker: markers[0], trailLines, cancelled: false };
@@ -365,13 +373,18 @@ function _animateMarker(obj, marker, wps, evt) {
   const cardinalBrg = evt.direction != null ? evt.direction : null;
 
   // Determine extrapolation velocity:
-  // Priority: (1) parsed cardinal direction, (2) waypoint trajectory,
-  // (3) fallback south — every marker keeps moving, just "guessing"
+  // Priority: (1) cardinal direction, (2) named destination, (3) waypoints, (4) fallback south
   let extrapVel, guessedBrg;
   if (cardinalBrg != null) {
     const rad = cardinalBrg * Math.PI / 180;
     extrapVel  = { dLat: Math.cos(rad) * speedDegMs, dLon: Math.sin(rad) * speedDegMs };
     guessedBrg = cardinalBrg;
+  } else if (evt.to_lat && evt.to_lon) {
+    // Aim toward the named destination
+    const toBrg = bearing(evt.lat, evt.lon, evt.to_lat, evt.to_lon);
+    const rad = toBrg * Math.PI / 180;
+    extrapVel  = { dLat: Math.cos(rad) * speedDegMs, dLon: Math.sin(rad) * speedDegMs };
+    guessedBrg = toBrg;
   } else if (wps.length >= 2) {
     extrapVel  = computeVelocity(wps, evt.type);
     guessedBrg = null;  // will be set from waypoints below
@@ -431,12 +444,20 @@ function _animateMarker(obj, marker, wps, evt) {
 function _extrapolateMarker(obj, marker, origin, vel, brg, evt) {
   if (obj.cancelled || !threats.has(obj.evt.id)) return;
   const count = (evt || obj.evt).count || 1;
-  // Set icon once — heading doesn't change during extrapolation
   if (brg != null) marker.setIcon(makeIcon(obj.evt.type, obj.evt.status, brg, count));
   const t0 = performance.now();
+  // Stop at named destination instead of flying past it
+  const destDist = (evt && evt.to_lat && evt.to_lon)
+    ? Math.hypot(evt.to_lat - origin.lat, evt.to_lon - origin.lon)
+    : null;
+  const velMag = Math.hypot(vel.dLat, vel.dLon);
   function step() {
     if (obj.cancelled || !threats.has(obj.evt.id)) return;
     const el = performance.now() - t0;
+    if (destDist !== null && velMag > 0 && velMag * el >= destDist) {
+      marker.setLatLng([evt.to_lat, evt.to_lon]);
+      return;  // arrived — stop animating
+    }
     marker.setLatLng([origin.lat + vel.dLat * el, origin.lon + vel.dLon * el]);
     requestAnimationFrame(step);
   }

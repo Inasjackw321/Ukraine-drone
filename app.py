@@ -3583,13 +3583,16 @@ async def _telegram_loop(cfg: dict) -> None:
     await client.start(phone=phone, code_callback=_code_cb, password=_pw_cb)
     log.info("Telegram authenticated")
 
-    entities: dict[int, str] = {}
+    # slug → entity object (for get_messages and chats filter)
+    entity_objs: dict[str, object] = {}
+    # entity .id → slug (for NewMessage lookup — event.chat.id is always the raw positive id)
+    entity_ids:  dict[int, str]    = {}
+
     for slug in cfg.get("channels", CHANNELS):
         try:
             ent = await client.get_entity(slug)
-            # Store both positive and negative IDs — Telegram channels use both depending on context
-            entities[ent.id]  = slug
-            entities[-ent.id] = slug
+            entity_objs[slug] = ent
+            entity_ids[ent.id] = slug
             log.info("  channel ready: @%s  (id=%d)", slug, ent.id)
         except Exception as e:
             log.warning("  can't resolve @%s — %s", slug, e)
@@ -3668,9 +3671,9 @@ async def _telegram_loop(cfg: dict) -> None:
     cutoff = datetime.now(timezone.utc) - timedelta(seconds=1200)
     seen_startup: set[int] = set()  # track IDs already pushed during startup
 
-    for eid, slug in entities.items():
+    for slug, ent in entity_objs.items():
         try:
-            msgs = await client.get_messages(eid, limit=100)
+            msgs = await client.get_messages(ent, limit=100)
         except Exception as e:
             log.warning("history fetch error %s: %s", slug, e)
             continue
@@ -3693,17 +3696,15 @@ async def _telegram_loop(cfg: dict) -> None:
         )
 
     # ── 2. Real-time handler — fires instantly on every new message ───────────
-    @client.on(events.NewMessage(chats=list(entities.keys())))
+    @client.on(events.NewMessage(chats=list(entity_objs.values())))
     async def _on_new(event):
-        # Telegram channels return negative chat_id in events; entities dict stores positive IDs
-        cid  = event.chat_id
-        slug = entities.get(cid) or entities.get(-cid) or entities.get(abs(cid)) or "unknown"
+        slug = entity_ids.get(event.chat.id, "unknown")
         msg  = event.message
         # Skip anything already ingested during startup load
         if msg.id in seen_startup:
             return
         if slug == "unknown":
-            log.debug("live message from untracked chat %d — skipping", cid)
+            log.debug("live message from untracked chat %d — skipping", event.chat.id)
             return
         log.info("[%s] live message #%d", slug, msg.id)
         await _process_msg(msg, slug)

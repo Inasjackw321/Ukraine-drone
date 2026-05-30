@@ -69,27 +69,28 @@ const layers = {
 // The outer ring color shows status; the inner fill shows threat type.
 
 const SHAPES = {
-  // drones: wide delta wing from above (Shahed / loitering munition top view)
-  drone:     'M8,1 L16,9 L13,12 L8,8 L3,12 L0,9 Z',
-  shahed:    'M8,1 L16,9 L13,12 L8,8 L3,12 L0,9 Z',
-  geran:     'M8,1 L16,9 L13,12 L8,8 L3,12 L0,9 Z',
-  kar:       'M8,1 L16,9 L13,12 L8,8 L3,12 L0,9 Z',
-  // cruise missiles: slim elongated dart with small rear fins
-  missile:   'M8,0 L10,14 L9,12 L8,16 L7,12 L6,14 Z',
-  kalibr:    'M8,0 L10,14 L9,12 L8,16 L7,12 L6,14 Z',
-  x101:      'M8,0 L10,14 L9,12 L8,16 L7,12 L6,14 Z',
-  x59:       'M8,0 L10,14 L9,12 L8,16 L7,12 L6,14 Z',
-  x22:       'M8,0 L10,14 L9,12 L8,16 L7,12 L6,14 Z',
-  oniks:     'M8,0 L10,14 L9,12 L8,16 L7,12 L6,14 Z',
-  // kinzhal: ultra-slim hypersonic needle
-  kinzhal:   'M8,0 L9.5,13 L8,11 L6.5,13 Z',
-  // ballistic / iskander: rounded warhead cone
-  iskander:  'M8,1 C12,1 14,6 14,11 C14,15 11,16 8,16 C5,16 2,15 2,11 C2,6 4,1 8,1 Z',
-  ballistic: 'M8,1 C12,1 14,6 14,11 C14,15 11,16 8,16 C5,16 2,15 2,11 C2,6 4,1 8,1 Z',
-  // glide bomb: wide swept wing viewed from above
-  glidebomb: 'M8,1 L16,7 L13,9 L8,15 L3,9 L0,7 Z',
+  // DRONE / SHAHED — wide flat delta wing from above (top-down UAV, ~2:1 wide/tall)
+  drone:     'M8,0 L15,8 L12,11 L8,9 L4,11 L1,8 Z',
+  shahed:    'M8,0 L15,8 L12,11 L8,9 L4,11 L1,8 Z',
+  geran:     'M8,0 L15,8 L12,11 L8,9 L4,11 L1,8 Z',
+  kar:       'M8,0 L15,8 L12,11 L8,9 L4,11 L1,8 Z',
+  // CRUISE MISSILE — slim elongated dart with swept fins (~4:1 tall/wide)
+  missile:   'M8,0 L10,12 L9,10 L8,15 L7,10 L6,12 Z',
+  kalibr:    'M8,0 L10,12 L9,10 L8,15 L7,10 L6,12 Z',
+  x101:      'M8,0 L10,12 L9,10 L8,15 L7,10 L6,12 Z',
+  x59:       'M8,0 L10,12 L9,10 L8,15 L7,10 L6,12 Z',
+  x22:       'M8,0 L10,12 L9,10 L8,15 L7,10 L6,12 Z',
+  oniks:     'M8,0 L10,12 L9,10 L8,15 L7,10 L6,12 Z',
+  // KINZHAL — ultra-slim hypersonic spike/needle
+  kinzhal:   'M8,0 L9.5,14 L8,11 L6.5,14 Z',
+  // ISKANDER / BALLISTIC — blunt rounded warhead cone
+  iskander:  'M8,1 C13,1 14,7 14,12 C14,15 11,16 8,16 C5,16 2,15 2,12 C2,7 3,1 8,1 Z',
+  ballistic: 'M8,1 C13,1 14,7 14,12 C14,15 11,16 8,16 C5,16 2,15 2,12 C2,7 3,1 8,1 Z',
+  // GLIDE BOMB — wide swept diamond (wider than drone)
+  glidebomb: 'M8,2 L16,7 L13,9 L8,15 L3,9 L0,7 Z',
+  // UNKNOWN — simple triangle
   unknown:   'M8,2 L14,13 L8,10 L2,13 Z',
-  // top-down aircraft silhouette
+  // AVIATION — top-down aircraft silhouette
   aviation:  'M8,0 L10,5 L16,6 L16,8 L10,8 L11,16 L8,14 L5,16 L6,8 L0,8 L0,6 L6,5 Z',
 };
 
@@ -104,7 +105,7 @@ function makeIcon(type, status, bearingDeg, count) {
   const ring  = RING_COLORS[status] || RING_COLORS.unknown;
   const isActive = status === 'moving' || status === 'launch' || status === 'alert';
   const pulse = isActive ? 'style="animation:iconPulse 1.8s infinite"' : '';
-  const size  = def.cat === 'missile' ? 44 : def.cat === 'glidebomb' ? 50 : 50;
+  const size  = def.cat === 'drone' ? 56 : def.cat === 'missile' ? 42 : def.cat === 'glidebomb' ? 52 : 48;
   const n = count > 1 ? count : 0;
   const dashArr = status === 'destroyed' ? '3 2' : 'none';
 
@@ -269,6 +270,14 @@ function addThreat(evt) {
     }).addTo(layers.paths));
   }
 
+  // Faint forecast line from detection point toward named destination
+  if (evt.to_lat && evt.to_lon) {
+    trailLines.push(L.polyline(
+      [[evt.lat, evt.lon], [evt.to_lat, evt.to_lon]],
+      { color: def.color, weight: 1, opacity: 0.35, dashArray: '3 8' }
+    ).addTo(layers.paths));
+  }
+
   const obj = { evt, markers, marker: markers[0], trailLines, cancelled: false };
   threats.set(evt.id, obj);
 
@@ -350,22 +359,21 @@ function _animateMarker(obj, marker, wps, evt) {
   const cardinalBrg = evt.direction != null ? evt.direction : null;
 
   // Determine extrapolation velocity:
-  // Priority: (1) parsed cardinal direction, (2) waypoint trajectory,
-  // (3) fallback south — every marker keeps moving, just "guessing"
+  // Priority: (1) cardinal direction, (2) named destination, (3) waypoints, (4) fallback south
   let extrapVel, guessedBrg;
   if (cardinalBrg != null) {
     const rad = cardinalBrg * Math.PI / 180;
     extrapVel  = { dLat: Math.cos(rad) * speedDegMs, dLon: Math.sin(rad) * speedDegMs };
     guessedBrg = cardinalBrg;
-  } else if (wps.length >= 2) {
-    extrapVel  = computeVelocity(wps, evt.type);
-    guessedBrg = null;  // will be set from waypoints below
   } else if (evt.to_lat && evt.to_lon) {
-    // Aim toward the parsed destination location
+    // Aim toward the named destination — most authoritative heading signal
     const toBrg = bearing(evt.lat, evt.lon, evt.to_lat, evt.to_lon);
     const rad = toBrg * Math.PI / 180;
     extrapVel  = { dLat: Math.cos(rad) * speedDegMs, dLon: Math.sin(rad) * speedDegMs };
     guessedBrg = toBrg;
+  } else if (wps.length >= 2) {
+    extrapVel  = computeVelocity(wps, evt.type);
+    guessedBrg = null;  // will be set from waypoints below
   } else {
     // No direction known — default heading for Russian assets entering Ukraine:
     // most attacks come from north/east, so default bearing is south (180°)
@@ -422,12 +430,20 @@ function _animateMarker(obj, marker, wps, evt) {
 function _extrapolateMarker(obj, marker, origin, vel, brg, evt) {
   if (obj.cancelled || !threats.has(obj.evt.id)) return;
   const count = (evt || obj.evt).count || 1;
-  // Set icon once — heading doesn't change during extrapolation
   if (brg != null) marker.setIcon(makeIcon(obj.evt.type, obj.evt.status, brg, count));
   const t0 = performance.now();
+  // If there's a known destination, stop there instead of flying past
+  const destDist = (evt && evt.to_lat && evt.to_lon)
+    ? Math.hypot(evt.to_lat - origin.lat, evt.to_lon - origin.lon)
+    : null;
+  const velMag = Math.hypot(vel.dLat, vel.dLon);
   function step() {
     if (obj.cancelled || !threats.has(obj.evt.id)) return;
     const el = performance.now() - t0;
+    if (destDist !== null && velMag > 0 && velMag * el >= destDist) {
+      marker.setLatLng([evt.to_lat, evt.to_lon]);
+      return;  // arrived at destination — stop animating
+    }
     marker.setLatLng([origin.lat + vel.dLat * el, origin.lon + vel.dLon * el]);
     requestAnimationFrame(step);
   }

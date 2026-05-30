@@ -314,6 +314,33 @@ LOCS: dict[str, tuple[float, float]] = {
     "брянськ":           (53.24, 34.36),  "таганрог":        (47.21, 38.93),
     "ростов":            (47.23, 39.72),  "краснодар":       (45.04, 38.98),
 
+    # ── Ukrainian adjectival oblast forms (dative/genitive/prepositional) ──────
+    # e.g. "в Харківській" / "Харківського" — very common in news text
+    "харківській":       (49.99, 36.23),  "харківського":      (49.99, 36.23),
+    "сумській":          (50.91, 34.80),  "сумського":         (50.91, 34.80),
+    "чернігівській":     (51.50, 31.29),  "чернігівського":    (51.50, 31.29),
+    "київській":         (50.52, 30.87),  "київського":        (50.52, 30.87),
+    "дніпропетровській": (48.46, 35.05),  "дніпропетровського":(48.46, 35.05),
+    "запорізькій":       (47.84, 35.14),  "запорізького":      (47.84, 35.14),
+    "миколаївській":     (46.98, 31.99),  "миколаївського":    (46.98, 31.99),
+    "херсонській":       (46.64, 32.62),  "херсонського":      (46.64, 32.62),
+    "донецькій":         (48.02, 37.80),  "донецького":        (48.02, 37.80),
+    "луганській":        (48.57, 39.31),  "луганського":       (48.57, 39.31),
+    "полтавській":       (49.59, 34.55),  "полтавського":      (49.59, 34.55),
+    "одеській":          (46.48, 30.72),  "одеського":         (46.48, 30.72),
+    "вінницькій":        (49.23, 28.47),  "вінницького":       (49.23, 28.47),
+    "житомирській":      (50.25, 28.66),  "житомирського":     (50.25, 28.66),
+    "хмельницькій":      (49.42, 26.99),  "хмельницького":     (49.42, 26.99),
+    "черкаській":        (49.44, 32.06),  "черкаського":       (49.44, 32.06),
+    "кіровоградській":   (48.51, 32.26),  "кіровоградського":  (48.51, 32.26),
+    "тернопільській":    (49.55, 25.59),  "тернопільського":   (49.55, 25.59),
+    "рівненській":       (50.62, 26.25),  "рівненського":      (50.62, 26.25),
+    "волинській":        (50.75, 25.33),  "волинського":       (50.75, 25.33),
+    "львівській":        (49.84, 24.03),  "львівського":       (49.84, 24.03),
+    "закарпатській":     (48.62, 22.29),  "закарпатського":    (48.62, 22.29),
+    "івано-франківській":(48.92, 24.71),  "івано-франківського":(48.92, 24.71),
+    "чернівецькій":      (48.29, 25.94),  "чернівецького":     (48.29, 25.94),
+
     # ── English region names (for English-language posts) ────────────────────
     "zaporizhzhia region": (47.84, 35.14), "zaporizhia region": (47.84, 35.14),
     "kharkiv region":    (49.99, 36.23),   "chernihiv region":  (51.50, 31.29),
@@ -498,10 +525,14 @@ _UA_NUM_RE = re.compile(
 )
 
 CHANNEL_NAMES = {
-    "kpszsu":      "UA Air Force",
-    "war_monitor": "War Monitor",
-    "mon1tor_ua":  "Monitor UA",
-    "eradar_ua":   "eRadar UA",
+    "kpszsu":                  "UA Air Force",
+    "war_monitor":             "War Monitor",
+    "mon1tor_ua":              "Monitor UA",
+    "eradar_ua":               "eRadar UA",
+    "ukrainian_intelligence":  "UA Intelligence",
+    "operativnoZSU":           "Operational ZSU",
+    "PovitryanaViiskaUA":      "Air Force UA",
+    "air_alert_ua":            "Air Alert UA",
 }
 
 # ── Cardinal direction parsing ────────────────────────────────────────────────
@@ -765,7 +796,16 @@ if WEB.exists():
 # ─────────────────────────────────────────────────────────────────────────────
 # Telegram polling  (10-minute cycle)
 # ─────────────────────────────────────────────────────────────────────────────
-CHANNELS  = ["kpszsu", "war_monitor", "mon1tor_ua", "eradar_ua"]
+CHANNELS  = [
+    "kpszsu",                 # Командування Повітряних Сил (UA Air Force)
+    "war_monitor",            # War Monitor (English)
+    "mon1tor_ua",             # Monitor Ukraine
+    "eradar_ua",              # eRadar Ukraine
+    "ukrainian_intelligence", # Розвідка України (reference-map source)
+    "operativnoZSU",          # Оперативний ЗСУ
+    "PovitryanaViiskaUA",     # Повітряні Сили ЗСУ
+    "air_alert_ua",           # Air Alert Ukraine
+]
 POLL_SECS = 60  # 1 minute
 
 
@@ -829,16 +869,32 @@ async def _telegram_loop(cfg: dict) -> None:
                     continue  # already processed
                 last_ids[slug] = max(last_ids[slug], msg.id)
 
-                # Split combined messages (e.g. "Сумщина: БПЛА; 🚀 Харківщина: ракета")
-                # into individual segments and parse each one separately
+                # Split combined messages into individual segments, then
+                # emit ONE event per location so every city gets its own icon.
                 raw = msg.message or ""
                 segments = split_segments(raw) or [raw]
                 for i, seg in enumerate(segments):
                     evt = parse_message(seg, slug, msg.id, msg_date=msg_date)
-                    if evt:
-                        evt["id"] = f"{msg.id}_{i}"  # stable, unique per segment
+                    if not evt:
+                        continue
+                    waypoints = evt.get("waypoints", [])
+                    if len(waypoints) <= 1:
+                        evt["id"] = f"{msg.id}_{i}_0"
                         log.info("[%s] %-10s  %s", slug, evt["type"], evt.get("location", "?"))
                         push_event(evt)
+                    else:
+                        # Multiple locations in one segment → separate icon per city
+                        for j, wp in enumerate(waypoints):
+                            sub = {
+                                **evt,
+                                "id":        f"{msg.id}_{i}_{j}",
+                                "lat":       wp["lat"],
+                                "lon":       wp["lon"],
+                                "location":  wp["name"],
+                                "waypoints": [wp],
+                            }
+                            log.info("[%s] %-10s  %s", slug, sub["type"], wp["name"])
+                            push_event(sub)
 
         nxt = (datetime.now(timezone.utc) + timedelta(seconds=POLL_SECS)).isoformat()
         if _loop and _loop.is_running():

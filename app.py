@@ -3546,12 +3546,7 @@ if WEB.exists():
 CHANNELS  = [
     "kpszsu",                 # Командування Повітряних Сил (UA Air Force)
     "war_monitor",            # War Monitor (English)
-    "mon1tor_ua",             # Monitor Ukraine
     "eradar_ua",              # eRadar Ukraine
-    "ukrainian_intelligence", # Розвідка України (reference-map source)
-    "operativnoZSU",          # Оперативний ЗСУ
-    "PovitryanaViiskaUA",     # Повітряні Сили ЗСУ
-    "air_alert_ua",           # Air Alert Ukraine
 ]
 POLL_SECS = 30  # only used for the "next update" UI hint
 

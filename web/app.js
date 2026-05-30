@@ -269,12 +269,15 @@ function addThreat(evt) {
     }).addTo(layers.paths));
   }
 
-  // Faint forecast line from detection point toward named destination
+  // Faint forecast line from detection point toward named destination (max 3° ≈ 330 km)
   if (evt.to_lat && evt.to_lon) {
-    trailLines.push(L.polyline(
-      [[evt.lat, evt.lon], [evt.to_lat, evt.to_lon]],
-      { color: def.color, weight: 1, opacity: 0.35, dashArray: '3 8' }
-    ).addTo(layers.paths));
+    const fDist = Math.hypot(evt.to_lat - evt.lat, evt.to_lon - evt.lon);
+    if (fDist <= 3.0) {
+      trailLines.push(L.polyline(
+        [[evt.lat, evt.lon], [evt.to_lat, evt.to_lon]],
+        { color: def.color, weight: 1, opacity: 0.35, dashArray: '3 8' }
+      ).addTo(layers.paths));
+    }
   }
 
   const obj = { evt, markers, marker: markers[0], trailLines, cancelled: false };
@@ -360,25 +363,24 @@ function _animateMarker(obj, marker, wps, evt) {
   const cardinalBrg = evt.direction != null ? evt.direction : null;
 
   // Determine extrapolation velocity:
-  // Priority: (1) cardinal direction, (2) named destination, (3) waypoints, (4) fallback south
+  // Priority: (1) named destination coords (precise), (2) waypoints, (3) cardinal direction, (4) fallback south
+  // Destination-derived bearing is most reliable — cardinal keywords are coarse and often ambiguous.
   let extrapVel, guessedBrg;
-  if (cardinalBrg != null) {
-    const rad = cardinalBrg * Math.PI / 180;
-    extrapVel  = { dLat: Math.cos(rad) * speedDegMs, dLon: Math.sin(rad) * speedDegMs };
-    guessedBrg = cardinalBrg;
-  } else if (evt.to_lat && evt.to_lon) {
-    // Aim toward the named destination
+  if (evt.to_lat && evt.to_lon) {
     const toBrg = bearing(evt.lat, evt.lon, evt.to_lat, evt.to_lon);
     const rad = toBrg * Math.PI / 180;
     extrapVel  = { dLat: Math.cos(rad) * speedDegMs, dLon: Math.sin(rad) * speedDegMs };
     guessedBrg = toBrg;
   } else if (wps.length >= 2) {
     extrapVel  = computeVelocity(wps, evt.type);
-    guessedBrg = null;  // will be set from waypoints below
+    guessedBrg = null;  // will be set from waypoints walk below
+  } else if (cardinalBrg != null) {
+    const rad = cardinalBrg * Math.PI / 180;
+    extrapVel  = { dLat: Math.cos(rad) * speedDegMs, dLon: Math.sin(rad) * speedDegMs };
+    guessedBrg = cardinalBrg;
   } else {
-    // No direction known — default heading for Russian assets entering Ukraine:
-    // most attacks come from north/east, so default bearing is south (180°)
-    const rad  = Math.PI;  // 180°
+    // No direction known — default heading south (most Russian assets enter from north/east)
+    const rad  = Math.PI;
     extrapVel  = { dLat: Math.cos(rad) * speedDegMs, dLon: Math.sin(rad) * speedDegMs };
     guessedBrg = 180;
   }
@@ -414,9 +416,8 @@ function _animateMarker(obj, marker, wps, evt) {
     curBrg = guessedBrg ?? 0;
   }
 
-  // Cardinal direction always wins for icon heading
-  if (cardinalBrg != null) curBrg = cardinalBrg;
-  if (guessedBrg != null && cardinalBrg == null && wps.length < 2) curBrg = guessedBrg;
+  // Apply guessedBrg (destination/cardinal) when waypoints didn't provide a bearing
+  if (guessedBrg != null) curBrg = guessedBrg;
 
   marker.setLatLng([curLat, curLon]);
   marker.setIcon(makeIcon(evt.type, evt.status, curBrg));

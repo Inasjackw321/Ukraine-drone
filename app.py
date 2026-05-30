@@ -3147,7 +3147,8 @@ FROM_RE = re.compile(
 )
 TO_RE = re.compile(
     r"(?:у\s+напрямку|в\s+напрямку|курс\s+на|курсом\s+на|\bдо\b|towards?\s+|"
-    r"in\s+the\s+direction\s+of|direction\s+of|heading\s+(?:to(?:wards?)?\s+)?)"
+    r"in\s+the\s+direction\s+of|direction\s+of|heading\s+(?:to(?:wards?)?\s+)?"
+    r"|\bto\s+(?:the\s+)?)"
     r"([\w\-'іїєА-ЯіїєҐґЄєІіЇї]{3,}(?:\s+[\w\-'іїєА-ЯіїєҐґЄєІіЇї]{3,})?)",
     re.I,
 )
@@ -3700,9 +3701,9 @@ async def _telegram_loop(cfg: dict) -> None:
             waypoints = evt.get("waypoints", [])
             evt["id"] = f"{msg.id}_{i}_0"
             if len(waypoints) > 1:
-                # Multiple locations: origin = first, destination = last (for animation heading)
-                # Don't create separate events per waypoint — one marker at origin only
-                if not evt.get("to_lat"):
+                # Only infer destination from waypoints when there are exactly 2 locations
+                # (clear origin→destination pair). With 3+ locations the last is often unrelated.
+                if not evt.get("to_lat") and len(waypoints) == 2:
                     last = waypoints[-1]
                     evt["to_lat"] = last["lat"]
                     evt["to_lon"] = last["lon"]

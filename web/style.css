@@ -42,6 +42,11 @@ html, body { height: 100%; overflow: hidden; font-family: 'Segoe UI', system-ui,
   color: #60a5fa; text-transform: uppercase; margin-bottom: 8px;
 }
 
+#hud-ver {
+  font-size: 9px; font-weight: 400; letter-spacing: 0;
+  color: #334155; margin-left: 4px; vertical-align: middle;
+}
+
 #hud-counts {
   display: flex; gap: 0; margin-bottom: 8px;
   border: 1px solid var(--border); border-radius: 5px; overflow: hidden;

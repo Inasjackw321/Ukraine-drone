@@ -207,7 +207,7 @@ function _patrolRoute(lat, lon) {
 // Arrange N markers in a line perpendicular to direction of travel
 function _formationOffsets(count, bearingDeg) {
   if (count <= 1) return [[0, 0]];
-  const SPACING = 0.055;  // ~6 km between each unit
+  const SPACING = 0.18;  // ~20 km between each unit — visible at default zoom 6
   const perpRad = (bearingDeg + 90) * Math.PI / 180;
   const half = (count - 1) / 2;
   const offsets = [];

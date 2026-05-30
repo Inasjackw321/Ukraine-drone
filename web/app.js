@@ -147,19 +147,26 @@ function computeVelocity(waypoints, type) {
 // ── Popup ─────────────────────────────────────────────────────────────────
 function popup(evt) {
   const def  = THREATS[evt.type] || THREATS.unknown;
-  const time = new Date(evt.ts).toLocaleTimeString('uk-UA', { hour: '2-digit', minute: '2-digit' });
-  const from = evt.from ? `↗ From: ${evt.from}` : '';
-  const to   = evt.to   ? `🎯 To: ${evt.to}` : '';
+  const time = new Date(evt.ts).toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit', hour12: false });
+  const DIRS = {0:'N',45:'NE',90:'E',135:'SE',180:'S',225:'SW',270:'W',315:'NW'};
+  const dirLabel = evt.direction != null ? (DIRS[evt.direction] || `${evt.direction}°`) : null;
+  const count = evt.count || 1;
   return `
-    <div style="min-width:190px">
-      <b style="color:${def.color};font-size:13px">${def.label} × ${evt.count || 1}</b>
-      <div style="color:#64748b;font-size:10px;margin:3px 0 6px">${time} · ${evt.channel || ''}</div>
-      ${evt.location ? `<div>📍 ${evt.location}</div>` : ''}
-      ${from ? `<div style="color:#64748b;font-size:11px">${from}</div>` : ''}
-      ${to   ? `<div style="color:#64748b;font-size:11px">${to}</div>` : ''}
+    <div style="min-width:200px;font-family:monospace">
+      <b style="color:${def.color};font-size:13px">${def.label}${count > 1 ? ` ×${count}` : ''}</b>
+      <span style="margin-left:8px;padding:1px 5px;background:${def.color}22;color:${def.color};
+                   border-radius:3px;font-size:10px">${(evt.status||'unknown').toUpperCase()}</span>
+      <div style="color:#64748b;font-size:10px;margin:4px 0 6px">${time} UTC · ${evt.channel || ''}</div>
+      ${evt.location ? `<div style="margin-bottom:3px">📍 <b>${evt.location}</b></div>` : ''}
+      ${dirLabel     ? `<div style="color:#94a3b8;font-size:11px">🧭 Heading: <b style="color:#e2e8f0">${dirLabel}</b></div>` : ''}
+      ${evt.from     ? `<div style="color:#94a3b8;font-size:11px">↗ From: ${evt.from}</div>` : ''}
+      ${evt.to       ? `<div style="color:#94a3b8;font-size:11px">🎯 Toward: ${evt.to}</div>` : ''}
+      ${evt.waypoints && evt.waypoints.length > 1
+        ? `<div style="color:#64748b;font-size:10px;margin-top:3px">📌 ${evt.waypoints.map(w=>w.name).join(' → ')}</div>`
+        : ''}
       <div style="margin-top:7px;padding-top:6px;border-top:1px solid #1a2332;
                   font-size:10px;color:#64748b;line-height:1.45">
-        ${(evt.text || '').substring(0, 160)}${(evt.text||'').length > 160 ? '…' : ''}
+        ${(evt.text || '').substring(0, 200)}${(evt.text||'').length > 200 ? '…' : ''}
       </div>
     </div>`;
 }
@@ -417,7 +424,7 @@ function updateStats() {
 // ── Feed ──────────────────────────────────────────────────────────────────
 function addFeedItem(evt) {
   const def  = THREATS[evt.type] || THREATS.unknown;
-  const time = new Date(evt.ts).toLocaleTimeString('uk-UA', { hour:'2-digit', minute:'2-digit' });
+  const time = new Date(evt.ts).toLocaleTimeString('en-US', { hour:'2-digit', minute:'2-digit' });
   const sCls = STATUS_CLASS[evt.status] || 's-unknown';
 
   const el = document.createElement('div');

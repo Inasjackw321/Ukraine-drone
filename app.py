@@ -1203,9 +1203,9 @@ def parse_message(text: str, channel: str, msg_id: int = 0, msg_date=None, raw_t
         n = ma.group(1) or ma.group(2)
         count = int(n) + 1 if ma.group(1) else int(n)    # "more than 5" → 6, "5+" → 5
     elif GROUP_RE.search(combined):
-        count = 3                                          # conservative: group = at least 3
+        count = random.randint(4, 8)                      # group/swarm/several = 4–8
     elif _PLURAL_RE.search(combined):
-        count = 2                                          # plural noun = at least 2
+        count = random.randint(2, 4)                      # plain plural = 2–4
     else:
         count = 1
 

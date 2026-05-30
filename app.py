@@ -6,6 +6,13 @@ Run:  python app.py           (prompts for credentials on first run)
       python app.py --browser (open in browser instead of desktop window)
 """
 
+# Auto-update: pull latest code from remote on every launch
+import subprocess, sys
+try:
+    subprocess.run(["git", "pull"], capture_output=True, timeout=10)
+except Exception:
+    pass
+
 import argparse
 import asyncio
 import json

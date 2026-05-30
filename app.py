@@ -3287,8 +3287,9 @@ def parse_message(text: str, channel: str, msg_id: int = 0, msg_date=None, raw_t
     if not text or len(text) < 10:
         return None
 
-    # Normalize Latin homoglyphs → Cyrillic so mixed-script abbreviations match
-    norm = _cyr_normalize(text)
+    # Normalize: lowercase + Latin homoglyphs → Cyrillic
+    # re.I doesn't always fold mixed-case Cyrillic reliably; lowercase first
+    norm = _cyr_normalize(text).lower()
 
     # Detect primary threat type
     threat = "unknown"

@@ -27,12 +27,17 @@ from pathlib import Path
 def _check_deps() -> None:
     import importlib.util as _ilu
     required = {
-        "fastapi":   "pip install fastapi",
-        "uvicorn":   "pip install uvicorn[standard]",
-        "telethon":  "pip install telethon",
-        "aiofiles":  "pip install aiofiles",
-        "websockets":"pip install websockets",
+        "fastapi":    "pip install fastapi",
+        "uvicorn":    "pip install uvicorn[standard]",
+        "telethon":   "pip install telethon",
+        "aiofiles":   "pip install aiofiles",
+        "websockets": "pip install websockets",
     }
+    # Soft dependency — app works without it, messages just show in original language
+    import importlib.util as _ilu2
+    if _ilu2.find_spec("deep_translator") is None:
+        print("\n  ⚠  deep-translator not installed — messages won't be translated.")
+        print("     Run:  pip install deep-translator\n")
     missing = [f"  {pkg:12s}  →  {cmd}" for pkg, cmd in required.items()
                if _ilu.find_spec(pkg) is None]
     if missing:
@@ -58,6 +63,35 @@ log = logging.getLogger("ukraine-drone")
 HERE   = Path(__file__).parent
 WEB    = HERE / "web"
 CONFIG = HERE / "config.json"
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Translation — every message is translated to English before display/parsing
+# ─────────────────────────────────────────────────────────────────────────────
+_trans_cache: dict[str, str] = {}
+
+async def _translate(text: str) -> str:
+    """Translate text to English using Google Translate. Cached, never raises."""
+    if not text or len(text.strip()) < 4:
+        return text
+    # Fast path: mostly ASCII letters → already English
+    alpha = [c for c in text if c.isalpha()]
+    if alpha and sum(c.isascii() for c in alpha) / len(alpha) > 0.85:
+        return text
+    key = text[:500]
+    if key in _trans_cache:
+        return _trans_cache[key]
+    try:
+        from deep_translator import GoogleTranslator
+        result = await asyncio.to_thread(
+            GoogleTranslator(source="auto", target="en").translate,
+            text[:4999],
+        )
+        out = result or text
+    except Exception as exc:
+        log.warning("Translation failed: %s", exc)
+        out = text
+    _trans_cache[key] = out
+    return out
 
 # ─────────────────────────────────────────────────────────────────────────────
 # Ukrainian Locations  (lat, lon)
@@ -375,9 +409,63 @@ LOCS: dict[str, tuple[float, float]] = {
     "enerhodar":         (47.50, 34.65),   "nova kakhovka":     (46.76, 33.38),
     "henichesk":         (46.17, 34.82),   "novomoskovsk":      (48.63, 35.23),
     "pavlohrad":         (48.53, 35.87),   "vovchansk":         (50.29, 36.94),
-    "chuhuiv":           (49.83, 36.68),   "izium":             (49.21, 37.27),
+    "chuhuiv":           (49.83, 36.68),
     "lozova":            (48.89, 36.32),   "balakliya":         (49.46, 36.85),
     "velykyi burluk":    (50.02, 37.17),   "zmiiv":             (49.68, 36.37),
+
+    # ── Dot-abbreviations used in rapid alert posts ───────────────────────────
+    "харк. обл":  (49.99, 36.23),  "харк.обл":   (49.99, 36.23),
+    "сум. обл":   (50.91, 34.80),  "сум.обл":    (50.91, 34.80),
+    "дніпр. обл": (48.46, 35.05),  "дніпр.обл":  (48.46, 35.05),
+    "запор. обл": (47.84, 35.14),  "запор.обл":  (47.84, 35.14),
+    "полт. обл":  (49.59, 34.55),  "хер. обл":   (46.64, 32.62),
+    "мик. обл":   (46.98, 31.99),  "він. обл":   (49.23, 28.47),
+    "черн. обл":  (51.50, 31.29),  "черн.обл":   (51.50, 31.29),
+    "льв. обл":   (49.84, 24.03),  "хмельн. обл":(49.42, 26.99),
+
+    # ── English city names missing from transliterations above ───────────────
+    # Zhytomyr oblast
+    "korosten":          (50.95, 28.65),  "berdychiv":        (49.90, 28.60),
+    "novograd-volynsky": (50.60, 27.63),  "novograd volynsky":(50.60, 27.63),
+    "ovruch":            (51.32, 28.81),  "malyn":            (50.77, 29.27),
+    # Kyiv oblast / suburbs
+    "irpin":             (50.52, 30.25),  "bucha":            (50.55, 30.23),
+    "hostomel":          (50.59, 30.27),  "vasylkiv":         (50.18, 30.32),
+    "borodyanka":        (50.65, 29.94),  "makariv":          (50.46, 29.81),
+    "vyshneve":          (50.38, 30.37),  "boyarka":          (50.34, 30.29),
+    "pereyaslav":        (50.07, 31.45),  "berezan":          (50.33, 31.47),
+    # Chernihiv oblast
+    "pryluky":           (50.60, 32.39),  "borzna":           (51.25, 32.41),
+    "mena":              (51.52, 32.21),  "sedniv":           (51.67, 31.60),
+    "oster":             (50.95, 30.88),  "bakhmach":         (51.17, 32.83),
+    # Sumy oblast
+    "hlukhiv":           (51.67, 33.91),  "seredyna-buda":    (52.19, 34.03),
+    "seredyna buda":     (52.19, 34.03),  "krolevets":        (51.54, 33.38),
+    "putyvl":            (51.34, 33.87),  "bilopillia":       (51.15, 34.31),
+    "bilopillya":        (51.15, 34.31),  "trostyanets":      (50.49, 34.97),
+    "akhtyrka":          (50.31, 34.90),
+    # Kharkiv oblast
+    "kupyansk":          (49.71, 37.61),  "dvorichna":        (49.85, 37.71),
+    "derhachi":          (50.14, 36.14),  "zolochiv":         (50.02, 36.03),
+    "balakliia":         (49.46, 36.85),  "shevchenkove":     (49.71, 37.19),
+    # Zaporizhzhia oblast
+    "orikhiv":           (47.56, 35.78),  "tokmak":           (47.25, 35.71),
+    "polohy":            (47.48, 36.26),  "huliaipole":       (47.66, 36.26),
+    # Dnipro oblast
+    "kamianske":         (48.51, 34.62),  "synelnykove":      (48.32, 35.52),
+    "pidhorodne":        (48.56, 35.14),
+    # Mykolaiv oblast
+    "voznesensk":        (47.56, 31.33),  "bashtanka":        (47.40, 32.44),
+    "snihurivka":        (47.08, 32.80),
+    # Kherson oblast
+    "skadovsk":          (46.12, 32.91),  "kakhovka":         (46.82, 33.48),
+    "hola prystan":      (46.53, 32.54),
+    # Common English spelling variants
+    "zaporizhia":        (47.84, 35.14),  "zaporozhye":       (47.84, 35.14),
+    "nikolaev":          (46.98, 31.99),  "nikolayev":        (46.98, 31.99),
+    "kharkov":           (49.99, 36.23),  "kiev":             (50.45, 30.52),
+    "dnepropetrovsk":    (48.46, 35.05),  "dniepropetrovsk":  (48.46, 35.05),
+    "lugansk":           (48.57, 39.31),  "donetsk":          (48.02, 37.80),
 }
 
 # Pre-sorted once for find_locations() — longest key first for greedy matching
@@ -400,6 +488,23 @@ def find_locations(text: str) -> list[dict]:
     results: list[dict] = []
     covered: list[tuple[int, int]] = []
 
+    # ── Pass 0: English preposition pattern — "over/in/near [City]" ──────────
+    # Runs before exact match so that multi-word city names (e.g. "Bila Tserkva")
+    # get a chance to be found via capitalisation even if the full phrase isn't
+    # in LOCS directly.
+    _EN_PREP_RE = re.compile(
+        r"\b(?:over|in|near|above|around|at|toward|towards|from|hitting|"
+        r"struck|strikes|targeting|targets|spotted over|detected over|"
+        r"heading (?:to|toward|towards))\s+([A-Z][a-zA-Z]+(?:[ \-][A-Z][a-zA-Z]+)*)",
+    )
+    for m in _EN_PREP_RE.finditer(text):
+        candidate = m.group(1).lower()
+        if candidate in LOCS:
+            s, e = m.start(1), m.end(1)
+            if not any(cs <= s and e <= ce for cs, ce in covered):
+                covered.append((s, e))
+                results.append({"name": m.group(1), "lat": LOCS[candidate][0], "lon": LOCS[candidate][1]})
+
     # ── Pass 1: exact match ───────────────────────────────────────────────────
     for key in _LOCS_SORTED:
         i = tl.find(key)
@@ -417,7 +522,8 @@ def find_locations(text: str) -> list[dict]:
         s, e = m.start(), m.end()
         if any(cs <= s and e <= ce for cs, ce in covered):
             continue
-        # Try trimming 1–6 chars; stop at the first LOCS key found
+        found = False
+        # Try trimming 1–6 chars; stop at the first exact LOCS key found
         for trim in range(1, min(7, len(word) - 3)):
             stem = word[:-trim]
             if len(stem) < 4:
@@ -429,7 +535,28 @@ def find_locations(text: str) -> list[dict]:
                     "lat": LOCS[stem][0],
                     "lon": LOCS[stem][1],
                 })
+                found = True
                 break
+        # Prefix completion: if trim-loop found nothing, check if any LOCS key
+        # starts with the longest reachable stem (≥5 chars). Catches
+        # "харківськ" → "харківська", "сумськ" → "сумська", etc.
+        if not found and len(word) >= 5:
+            for trim in range(1, min(7, len(word) - 3)):
+                stem = word[:-trim]
+                if len(stem) < 5:
+                    break
+                for key in _LOCS_SORTED:
+                    if key.startswith(stem):
+                        covered.append((s, e))
+                        results.append({
+                            "name": text[s:e],
+                            "lat": LOCS[key][0],
+                            "lon": LOCS[key][1],
+                        })
+                        found = True
+                        break
+                if found:
+                    break
 
     return results
 
@@ -448,6 +575,12 @@ THREAT_RE: list[tuple[re.Pattern, str]] = [
     (re.compile(r"х-69|x-69",               re.I), "x59"),
     (re.compile(r"онікс|oniks",              re.I), "oniks"),
     (re.compile(r"калібр|kalibr|caliber",   re.I), "kalibr"),
+    # Glide bombs — КАБ / ФАБ+УМПК (high priority, before generic "bomb/ракет")
+    (re.compile(
+        r"каб-\d+|каб\b|kab-\d+|\bkab\b|"
+        r"фаб-\d+|фаб\b|fab-\d+|\bfab\b|умпк|umpk|"
+        r"керован[аі]\s+авіабомб|glide\s*bomb|guided\s*bomb|guided\s*aerial",
+        re.I), "glidebomb"),
     (re.compile(r"шахед|shaheed|shahed",    re.I), "shahed"),
     (re.compile(r"герань|geran",             re.I), "geran"),
     (re.compile(r"балістич|ballistic",       re.I), "ballistic"),
@@ -496,7 +629,7 @@ TO_RE = re.compile(
     re.I,
 )
 COUNT_RE = re.compile(
-    r"(\d+)\s*(?:шахед|бпла|бпл|ракет|дрон|калібр|кинджал|uav|uavs|drone|drones|missile|missiles|kar)",
+    r"(\d+)\s*(?:шахед|бпла|бпл|ракет|дрон|калібр|кинджал|каб|фаб|uav|uavs|drone|drones|missile|missiles|kar|kab|fab)",
     re.I,
 )
 GROUP_RE = re.compile(
@@ -530,7 +663,7 @@ CHANNEL_NAMES = {
     "mon1tor_ua":              "Monitor UA",
     "eradar_ua":               "eRadar UA",
     "ukrainian_intelligence":  "UA Intelligence",
-    "operativnoZSU":           "Operational ZSU",
+    "operativnoZSU":           "UA Armed Forces Ops",
     "PovitryanaViiskaUA":      "Air Force UA",
     "air_alert_ua":            "Air Alert UA",
 }
@@ -573,8 +706,49 @@ def split_segments(text: str) -> list[str]:
     return [p.strip() for p in parts if len(p.strip()) >= 12]
 
 
+# Oblast-level fallback location hints — used when find_locations() finds nothing
+# Keys are lowercase prefixes; values are (lat, lon) of the oblast centre.
+OBLAST_HINTS: dict[str, tuple[float, float]] = {
+    "харківськ":    (49.99, 36.23),  "харк":          (49.99, 36.23),
+    "сумськ":       (50.91, 34.80),  "сум":           (50.91, 34.80),
+    "чернігівськ":  (51.50, 31.29),  "чернігів":      (51.50, 31.29),
+    "київськ":      (50.52, 30.87),
+    "дніпропетровськ": (48.46, 35.05), "дніпровськ":  (48.46, 35.05),
+    "запорізьк":    (47.84, 35.14),  "запоріж":       (47.84, 35.14),
+    "миколаївськ":  (46.98, 31.99),
+    "херсонськ":    (46.64, 32.62),
+    "донецьк":      (48.02, 37.80),
+    "луганськ":     (48.57, 39.31),
+    "полтавськ":    (49.59, 34.55),
+    "одеськ":       (46.48, 30.72),
+    "вінницьк":     (49.23, 28.47),
+    "житомирськ":   (50.25, 28.66),
+    "черкаськ":     (49.44, 32.06),
+    "кіровоградськ":(48.51, 32.26),
+    "тернопільськ": (49.55, 25.59),
+    "рівненськ":    (50.62, 26.25),
+    "волинськ":     (50.75, 25.33),
+    "львівськ":     (49.84, 24.03),
+    "закарпатськ":  (48.62, 22.29),
+    "чернівецьк":   (48.29, 25.94),
+    # English hints
+    "kharkiv":      (49.99, 36.23),  "sumy":          (50.91, 34.80),
+    "chernihiv":    (51.50, 31.29),  "kyiv":          (50.45, 30.52),
+    "dnipro":       (48.46, 35.05),  "zaporizhzhia":  (47.84, 35.14),
+    "zaporizhia":   (47.84, 35.14),  "kherson":       (46.64, 32.62),
+    "mykolaiv":     (46.98, 31.99),  "donetsk":       (48.02, 37.80),
+    "luhansk":      (48.57, 39.31),  "poltava":       (49.59, 34.55),
+    "odesa":        (46.48, 30.72),  "odessa":        (46.48, 30.72),
+    "vinnytsia":    (49.23, 28.47),  "zhytomyr":      (50.25, 28.66),
+}
+_OBLAST_HINT_RE = re.compile(
+    "|".join(re.escape(k) for k in sorted(OBLAST_HINTS, key=len, reverse=True)),
+    re.I,
+)
+
+
 def parse_message(text: str, channel: str, msg_id: int = 0, msg_date=None) -> dict | None:
-    if not text or len(text) < 15:
+    if not text or len(text) < 10:
         return None
 
     # Detect primary threat type
@@ -585,11 +759,20 @@ def parse_message(text: str, channel: str, msg_id: int = 0, msg_date=None) -> di
             break
 
     locs = find_locations(text)
-    if not locs:
-        return None  # no location = nothing to plot
 
-    # Status
-    status = "unknown"
+    # Fallback: if LOCS matching found nothing, try oblast-level hint
+    if not locs:
+        hm = _OBLAST_HINT_RE.search(text)
+        if hm:
+            key = hm.group().lower()
+            lat, lon = OBLAST_HINTS[key]
+            locs = [{"name": hm.group(), "lat": lat, "lon": lon}]
+        else:
+            log.debug("[%s] UNPLOTTED: %.80s", channel, text.replace("\n", " "))
+            return None
+
+    # Status — default "alert" (most channel posts without a status keyword are alerts)
+    status = "alert"
     for st, pat in STATUS_RE.items():
         if pat.search(text):
             status = st
@@ -655,6 +838,7 @@ from fastapi.responses import FileResponse, Response
 from fastapi.staticfiles import StaticFiles
 
 _events: deque[dict] = deque(maxlen=500)
+_raw_messages: deque[dict] = deque(maxlen=200)
 _clients: set[WebSocket] = set()
 _loop: asyncio.AbstractEventLoop | None = None
 _stats = {"total": 0, "channels": set()}
@@ -702,6 +886,11 @@ def _get_events():
 @web_app.get("/api/stats")
 def _get_stats():
     return {**_stats, "channels": list(_stats["channels"]), "clients": len(_clients)}
+
+
+@web_app.get("/api/messages")
+def _get_messages():
+    return {"messages": list(_raw_messages)}
 
 
 _BROWSER_UA = (
@@ -806,12 +995,12 @@ CHANNELS  = [
     "PovitryanaViiskaUA",     # Повітряні Сили ЗСУ
     "air_alert_ua",           # Air Alert Ukraine
 ]
-POLL_SECS = 60  # 1 minute
+POLL_SECS = 30  # only used for the "next update" UI hint
 
 
 async def _telegram_loop(cfg: dict) -> None:
     try:
-        from telethon import TelegramClient
+        from telethon import TelegramClient, events
     except ImportError:
         log.error("telethon not installed — pip install telethon")
         return
@@ -826,7 +1015,6 @@ async def _telegram_loop(cfg: dict) -> None:
     phone = tg.get("phone", "")
 
     async def _code_cb() -> str:
-        # Must use terminal input here — tkinter can't be called safely from threads
         print(f"\n  [Telegram] Check your phone ({phone}) for a verification code.")
         return input("  Code: ").strip()
 
@@ -846,63 +1034,117 @@ async def _telegram_loop(cfg: dict) -> None:
         except Exception as e:
             log.warning("  can't resolve @%s — %s", slug, e)
 
-    last_ids: dict[str, int] = {s: 0 for s in entities.values()}
+    # ── shared processing logic ───────────────────────────────────────────────
+    async def _process_msg(msg, slug: str, *, is_history: bool = False) -> bool:
+        """Translate, parse, and push events for one Telethon message."""
+        if not msg.date:
+            return False
+        msg_date = msg.date if msg.date.tzinfo else msg.date.replace(tzinfo=timezone.utc)
 
-    while True:
-        cutoff = datetime.now(timezone.utc) - timedelta(seconds=1200)  # 20 min startup window
+        raw = msg.message or ""
+        if not raw.strip():
+            return False
 
-        for eid, slug in entities.items():
-            try:
-                msgs = await client.get_messages(eid, limit=50)
-            except Exception as e:
-                log.warning("fetch error %s: %s", slug, e)
+        # Translate to English — used for both display and NLP parsing
+        text = await _translate(raw)
+
+        raw_entry: dict = {
+            "ts":      msg_date.isoformat(),
+            "channel": CHANNEL_NAMES.get(slug, slug),
+            "text":    text[:400],
+            "plotted": False,
+        }
+        _raw_messages.appendleft(raw_entry)
+
+        segments = split_segments(text) or [text]
+        any_plotted = False
+        for i, seg in enumerate(segments):
+            evt = parse_message(seg, slug, msg.id, msg_date=msg_date)
+            if not evt:
                 continue
+            waypoints = evt.get("waypoints", [])
+            if len(waypoints) <= 1:
+                evt["id"] = f"{msg.id}_{i}_0"
+                log.info("[%s] %-10s  %s", slug, evt["type"], evt.get("location", "?"))
+                push_event(evt)
+                any_plotted = True
+            else:
+                for j, wp in enumerate(waypoints):
+                    sub = {
+                        **evt,
+                        "id":        f"{msg.id}_{i}_{j}",
+                        "lat":       wp["lat"],
+                        "lon":       wp["lon"],
+                        "location":  wp["name"],
+                        "waypoints": [wp],
+                    }
+                    log.info("[%s] %-10s  %s", slug, sub["type"], wp["name"])
+                    push_event(sub)
+                    any_plotted = True
 
-            for msg in reversed(msgs or []):
-                if not msg.date:
-                    continue
-                # Telethon may return naive or aware datetimes — normalise to UTC
-                msg_date = msg.date if msg.date.tzinfo else msg.date.replace(tzinfo=timezone.utc)
-                if msg_date < cutoff:
-                    continue  # older than 30 minutes, skip
-                if msg.id <= last_ids[slug]:
-                    continue  # already processed
-                last_ids[slug] = max(last_ids[slug], msg.id)
+        if any_plotted:
+            raw_entry["plotted"] = True
+        else:
+            # No location found — still push to live feed (no map marker)
+            fallback: dict = {
+                "id":       f"{msg.id}_text",
+                "ts":       msg_date.isoformat(),
+                "channel":  CHANNEL_NAMES.get(slug, slug),
+                "msg_id":   msg.id,
+                "text":     text[:400],
+                "type":     "unknown",
+                "status":   "alert",
+                "count":    1,
+                "lat":      None,
+                "lon":      None,
+                "location": None,
+                "waypoints": [],
+            }
+            push_event(fallback)
+            log.debug("[%s] text-only: %.60s", slug, text.replace("\n", " "))
+        return any_plotted
 
-                # Split combined messages into individual segments, then
-                # emit ONE event per location so every city gets its own icon.
-                raw = msg.message or ""
-                segments = split_segments(raw) or [raw]
-                for i, seg in enumerate(segments):
-                    evt = parse_message(seg, slug, msg.id, msg_date=msg_date)
-                    if not evt:
-                        continue
-                    waypoints = evt.get("waypoints", [])
-                    if len(waypoints) <= 1:
-                        evt["id"] = f"{msg.id}_{i}_0"
-                        log.info("[%s] %-10s  %s", slug, evt["type"], evt.get("location", "?"))
-                        push_event(evt)
-                    else:
-                        # Multiple locations in one segment → separate icon per city
-                        for j, wp in enumerate(waypoints):
-                            sub = {
-                                **evt,
-                                "id":        f"{msg.id}_{i}_{j}",
-                                "lat":       wp["lat"],
-                                "lon":       wp["lon"],
-                                "location":  wp["name"],
-                                "waypoints": [wp],
-                            }
-                            log.info("[%s] %-10s  %s", slug, sub["type"], wp["name"])
-                            push_event(sub)
+    # ── 1. Initial history load (last 20 minutes) ─────────────────────────────
+    cutoff = datetime.now(timezone.utc) - timedelta(seconds=1200)
+    seen_startup: set[int] = set()  # track IDs already pushed during startup
 
-        nxt = (datetime.now(timezone.utc) + timedelta(seconds=POLL_SECS)).isoformat()
-        if _loop and _loop.is_running():
-            asyncio.run_coroutine_threadsafe(
-                _broadcast({"type": "next_update", "at": nxt}), _loop
-            )
-        log.info("Next Telegram poll in %d minutes", POLL_SECS // 60)
-        await asyncio.sleep(POLL_SECS)
+    for eid, slug in entities.items():
+        try:
+            msgs = await client.get_messages(eid, limit=100)
+        except Exception as e:
+            log.warning("history fetch error %s: %s", slug, e)
+            continue
+
+        for msg in reversed(msgs or []):
+            if not msg.date:
+                continue
+            msg_date = msg.date if msg.date.tzinfo else msg.date.replace(tzinfo=timezone.utc)
+            if msg_date < cutoff:
+                continue
+            seen_startup.add(msg.id)
+            await _process_msg(msg, slug, is_history=True)
+
+    log.info("History load complete — switching to real-time event mode")
+
+    # Signal "live" to the UI
+    if _loop and _loop.is_running():
+        asyncio.run_coroutine_threadsafe(
+            _broadcast({"type": "next_update", "at": "live"}), _loop
+        )
+
+    # ── 2. Real-time handler — fires instantly on every new message ───────────
+    @client.on(events.NewMessage(chats=list(entities.keys())))
+    async def _on_new(event):
+        slug = entities.get(event.chat_id, "unknown")
+        msg  = event.message
+        # Skip anything already ingested during startup load
+        if msg.id in seen_startup:
+            return
+        log.info("[%s] live message #%d", slug, msg.id)
+        await _process_msg(msg, slug)
+
+    # ── 3. Keep the connection alive indefinitely ─────────────────────────────
+    await client.run_until_disconnected()
 
 
 def _run_telegram(cfg: dict) -> None:

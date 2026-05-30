@@ -4,21 +4,22 @@
 // ── Threat definitions ────────────────────────────────────────────────────
 // speed_kmh used for extrapolation after last waypoint
 const THREATS = {
-  shahed:    { label: 'Shahed',    color: '#f97316', glow: '#f97316', speed: 150,  cat: 'drone'   },
-  geran:     { label: 'Geranium',  color: '#f97316', glow: '#f97316', speed: 150,  cat: 'drone'   },
-  drone:     { label: 'UAV',      color: '#60a5fa', glow: '#3b82f6', speed: 150,  cat: 'drone'   },
-  kar:       { label: 'KAR',       color: '#fb923c', glow: '#ea580c', speed: 200,  cat: 'drone'   },
-  kalibr:    { label: 'Kalibr',    color: '#ef4444', glow: '#dc2626', speed: 700,  cat: 'missile' },
-  x101:      { label: 'X-101',     color: '#f87171', glow: '#ef4444', speed: 780,  cat: 'missile' },
-  x59:       { label: 'X-59',      color: '#fb923c', glow: '#ea580c', speed: 900,  cat: 'missile' },
-  x22:       { label: 'X-22',      color: '#f43f5e', glow: '#e11d48', speed: 1000, cat: 'missile' },
-  oniks:     { label: 'Oniks',     color: '#e879f9', glow: '#c026d3', speed: 2500, cat: 'missile' },
-  kinzhal:   { label: 'Kinzhal',   color: '#c084fc', glow: '#a855f7', speed: 3000, cat: 'missile' },
-  iskander:  { label: 'Iskander',  color: '#fbbf24', glow: '#d97706', speed: 1500, cat: 'missile' },
-  ballistic: { label: 'Ballistic', color: '#eab308', glow: '#ca8a04', speed: 1200, cat: 'missile' },
-  missile:   { label: 'Missile',   color: '#ef4444', glow: '#dc2626', speed: 700,  cat: 'missile' },
-  unknown:   { label: 'Unknown',   color: '#94a3b8', glow: '#64748b', speed: 300,  cat: 'unknown' },
-  aviation:  { label: 'Aviation',  color: '#38bdf8', glow: '#0ea5e9', speed: 800,  cat: 'aviation' },
+  shahed:    { label: 'Shahed',     color: '#f97316', glow: '#f97316', speed: 150,  cat: 'drone'      },
+  geran:     { label: 'Geranium',   color: '#f97316', glow: '#f97316', speed: 150,  cat: 'drone'      },
+  drone:     { label: 'UAV',        color: '#60a5fa', glow: '#3b82f6', speed: 150,  cat: 'drone'      },
+  kar:       { label: 'KAR',        color: '#fb923c', glow: '#ea580c', speed: 200,  cat: 'drone'      },
+  glidebomb: { label: 'Glide Bomb', color: '#f59e0b', glow: '#d97706', speed: 500,  cat: 'glidebomb'  },
+  kalibr:    { label: 'Kalibr',     color: '#ef4444', glow: '#dc2626', speed: 700,  cat: 'missile'    },
+  x101:      { label: 'X-101',      color: '#f87171', glow: '#ef4444', speed: 780,  cat: 'missile'    },
+  x59:       { label: 'X-59',       color: '#fb923c', glow: '#ea580c', speed: 900,  cat: 'missile'    },
+  x22:       { label: 'X-22',       color: '#f43f5e', glow: '#e11d48', speed: 1000, cat: 'missile'    },
+  oniks:     { label: 'Oniks',      color: '#e879f9', glow: '#c026d3', speed: 2500, cat: 'missile'    },
+  kinzhal:   { label: 'Kinzhal',    color: '#c084fc', glow: '#a855f7', speed: 3000, cat: 'missile'    },
+  iskander:  { label: 'Iskander',   color: '#fbbf24', glow: '#d97706', speed: 1500, cat: 'missile'    },
+  ballistic: { label: 'Ballistic',  color: '#eab308', glow: '#ca8a04', speed: 1200, cat: 'missile'    },
+  missile:   { label: 'Missile',    color: '#ef4444', glow: '#dc2626', speed: 700,  cat: 'missile'    },
+  unknown:   { label: 'Unknown',    color: '#94a3b8', glow: '#64748b', speed: 300,  cat: 'unknown'    },
+  aviation:  { label: 'Aviation',   color: '#38bdf8', glow: '#0ea5e9', speed: 800,  cat: 'aviation'   },
 };
 
 const STATUS_CLASS = {
@@ -31,8 +32,10 @@ const DEG_PER_KM = 1 / 111;
 
 // Threat expires after this long (disappears from map)
 const EXPIRE_MS = 30 * 60 * 1000;
-// Cap how far back in time we extrapolate position on load (avoids huge jumps)
-const MAX_EXTRAP_MS = 3 * 60 * 1000;
+// How far back in time to extrapolate position on initial load.
+// Matches the 20-min history window so a drone reported 20 min ago
+// appears at its current estimated position, not its original reported spot.
+const MAX_EXTRAP_MS = 20 * 60 * 1000;
 
 // ── Map ───────────────────────────────────────────────────────────────────
 const map = L.map('map', {
@@ -66,26 +69,28 @@ const layers = {
 // The outer ring color shows status; the inner fill shows threat type.
 
 const SHAPES = {
-  // drones: wide triangle
-  drone:   'M8,1 L15,14 L8,11 L1,14 Z',
-  shahed:  'M8,1 L15,14 L8,11 L1,14 Z',
-  geran:   'M8,1 L15,14 L8,11 L1,14 Z',
-  kar:     'M8,1 L15,14 L8,11 L1,14 Z',
-  // cruise missiles: slim dart
-  missile: 'M8,1 L13,15 L8,12 L3,15 Z',
-  kalibr:  'M8,1 L13,15 L8,12 L3,15 Z',
-  x101:    'M8,1 L13,15 L8,12 L3,15 Z',
-  x59:     'M8,1 L13,15 L8,12 L3,15 Z',
-  x22:     'M8,1 L13,15 L8,12 L3,15 Z',
-  oniks:   'M8,1 L13,15 L8,12 L3,15 Z',
-  // kinzhal: ultra-slim needle
-  kinzhal: 'M8,0 L11,16 L8,13 L5,16 Z',
-  // ballistic / iskander: teardrop
-  iskander:  'M8,1 C12,1 14,7 14,12 C14,15 11,16 8,16 C5,16 2,15 2,12 C2,7 4,1 8,1 Z',
-  ballistic: 'M8,1 C12,1 14,7 14,12 C14,15 11,16 8,16 C5,16 2,15 2,12 C2,7 4,1 8,1 Z',
-  unknown:  'M8,2 L14,14 L8,11 L2,14 Z',
+  // drones: swept-wing delta shape
+  drone:     'M8,1 L15,13 L11,11 L8,14 L5,11 L1,13 Z',
+  shahed:    'M8,1 L15,13 L11,11 L8,14 L5,11 L1,13 Z',
+  geran:     'M8,1 L15,13 L11,11 L8,14 L5,11 L1,13 Z',
+  kar:       'M8,1 L15,13 L11,11 L8,14 L5,11 L1,13 Z',
+  // cruise missiles: slim sleek dart with notched tail
+  missile:   'M8,0 L12,12 L10,11 L8,15 L6,11 L4,12 Z',
+  kalibr:    'M8,0 L12,12 L10,11 L8,15 L6,11 L4,12 Z',
+  x101:      'M8,0 L12,12 L10,11 L8,15 L6,11 L4,12 Z',
+  x59:       'M8,0 L12,12 L10,11 L8,15 L6,11 L4,12 Z',
+  x22:       'M8,0 L12,12 L10,11 L8,15 L6,11 L4,12 Z',
+  oniks:     'M8,0 L12,12 L10,11 L8,15 L6,11 L4,12 Z',
+  // kinzhal: ultra-slim needle with double notch
+  kinzhal:   'M8,0 L10,14 L8,11 L6,14 Z',
+  // ballistic / iskander: rounded warhead silhouette
+  iskander:  'M8,1 C11,1 13,5 13,10 C13,14 11,15 8,15 C5,15 3,14 3,10 C3,5 5,1 8,1 Z',
+  ballistic: 'M8,1 C11,1 13,5 13,10 C13,14 11,15 8,15 C5,15 3,14 3,10 C3,5 5,1 8,1 Z',
+  // glide bomb: swept diamond — short broad wing
+  glidebomb: 'M8,2 L15,7 L12,8 L8,15 L4,8 L1,7 Z',
+  unknown:   'M8,2 L14,13 L8,10 L2,13 Z',
   // top-down aircraft silhouette
-  aviation: 'M8,0 L10,5 L16,6 L16,8 L10,8 L11,16 L8,14 L5,16 L6,8 L0,8 L0,6 L6,5 Z',
+  aviation:  'M8,0 L10,5 L16,6 L16,8 L10,8 L11,16 L8,14 L5,16 L6,8 L0,8 L0,6 L6,5 Z',
 };
 
 const RING_COLORS = {
@@ -93,20 +98,43 @@ const RING_COLORS = {
   alert:  '#facc15', destroyed: '#22c55e', unknown: '#64748b',
 };
 
-function makeIcon(type, status, bearingDeg) {
-  const def    = THREATS[type] || THREATS.unknown;
-  const shape  = SHAPES[type]  || SHAPES.unknown;
-  const ring   = RING_COLORS[status] || RING_COLORS.unknown;
+function makeIcon(type, status, bearingDeg, count) {
+  const def   = THREATS[type] || THREATS.unknown;
+  const shape = SHAPES[type]  || SHAPES.unknown;
+  const ring  = RING_COLORS[status] || RING_COLORS.unknown;
   const isActive = status === 'moving' || status === 'launch' || status === 'alert';
-  const pulse  = isActive ? 'style="animation:iconPulse 1.8s infinite"' : '';
-  const size   = type === 'kinzhal' ? 40 : (def.cat === 'missile' ? 34 : 36);
+  const pulse = isActive ? 'style="animation:iconPulse 1.8s infinite"' : '';
+  const size  = type === 'kinzhal' ? 50 : (def.cat === 'glidebomb' ? 54 : def.cat === 'missile' ? 46 : 54);
+  const n = count > 1 ? count : 0;
+  const uid = Math.random().toString(36).slice(2, 7);
 
+  // Lighter tint of the fill color for the gradient highlight
   const svg = `
-    <svg width="${size}" height="${size}" viewBox="0 0 16 16"
-         style="transform:rotate(${bearingDeg}deg);filter:drop-shadow(0 0 4px ${def.glow}88)"
-         ${pulse}>
-      <path d="${shape}" fill="${def.color}" opacity=".92"/>
-      <circle cx="8" cy="8" r="7" fill="none" stroke="${ring}" stroke-width="1.2" opacity=".7"/>
+    <svg width="${size}" height="${size}" viewBox="0 0 20 22"
+         style="transform:rotate(${bearingDeg}deg)" ${pulse}>
+      <defs>
+        <radialGradient id="g${uid}" cx="40%" cy="30%" r="65%">
+          <stop offset="0%"   stop-color="#ffffff" stop-opacity="0.35"/>
+          <stop offset="100%" stop-color="${def.color}" stop-opacity="0"/>
+        </radialGradient>
+        <filter id="f${uid}" x="-40%" y="-40%" width="180%" height="180%">
+          <feGaussianBlur in="SourceGraphic" stdDeviation="1.8" result="blur"/>
+          <feColorMatrix in="blur" type="matrix"
+            values="1 0 0 0 0  0 1 0 0 0  0 0 1 0 0  0 0 0 14 -5" result="glow"/>
+          <feMerge><feMergeNode in="glow"/><feMergeNode in="SourceGraphic"/></feMerge>
+        </filter>
+      </defs>
+      <g transform="scale(1.25) translate(0,-1)" filter="url(#f${uid})">
+        <path d="${shape}" fill="${def.color}" opacity="0.95"
+              stroke="${def.glow}" stroke-width="0.4" stroke-opacity="0.6"/>
+        <path d="${shape}" fill="url(#g${uid})"/>
+        <circle cx="8" cy="8" r="7" fill="none" stroke="${ring}"
+                stroke-width="1.5" opacity="0.9"
+                stroke-dasharray="${status === 'destroyed' ? '3 2' : 'none'}"/>
+      </g>
+      ${n ? `<text x="10" y="21" text-anchor="middle" font-family="monospace"
+               font-size="5.5" font-weight="bold" fill="white"
+               stroke="#080c10" stroke-width="1">×${n}</text>` : ''}
     </svg>`;
 
   return L.divIcon({
@@ -137,7 +165,7 @@ function computeVelocity(waypoints, type) {
   const mag  = Math.hypot(dlat, dlon);
   if (mag < 1e-9) return { dLat: 0, dLon: 0 };
 
-  // Normalise then scale to real speed (deg-lat per ms)
+  // Normalise then scale to animation speed (deg-lat per ms)
   const speedKmh    = (THREATS[type] || THREATS.unknown).speed;
   const speedDegMs  = speedKmh * DEG_PER_KM / 3_600_000;
 
@@ -173,7 +201,14 @@ function popup(evt) {
 
 // ── Threat state ──────────────────────────────────────────────────────────
 const threats = new Map();
-const seenIds = new Set();
+// seenIds: Map<id, timestamp> — expires after 35 min so server-restart history reloads correctly
+const seenIds = new Map();
+function hasSeen(id) { return seenIds.has(id); }
+function markSeen(id) { seenIds.set(id, Date.now()); }
+setInterval(() => {
+  const cutoff = Date.now() - 35 * 60 * 1000;
+  for (const [id, ts] of seenIds) if (ts < cutoff) seenIds.delete(id);
+}, 5 * 60 * 1000);
 let totalCount = 0;
 
 // Build a racetrack patrol loop centred on (lat,lon) for aviation threats
@@ -229,7 +264,7 @@ function addThreat(evt) {
     let m;
     try {
       m = L.marker([lat, lon], {
-        icon: makeIcon(evt.type, evt.status, brg),
+        icon: makeIcon(evt.type, evt.status, brg, count),
         zIndexOffset: def.cat === 'missile' ? 1000 : 500,
       });
     } catch(e) {
@@ -242,28 +277,11 @@ function addThreat(evt) {
     markers.push(m);
   });
 
-  // Trail + projection on primary marker only
+  // Waypoint trail only (no forward-projection line — it caused cross-Ukraine artifacts)
   if (wps.length >= 2) {
     trailLines.push(L.polyline(wps.map(w => [w.lat, w.lon]), {
-      color: def.color, weight: 2, opacity: 0.55, dashArray: '6 10',
+      color: def.color, weight: 2, opacity: 0.5, dashArray: '5 9',
     }).addTo(layers.paths));
-
-    let vel;
-    if (evt.direction != null) {
-      const rad = evt.direction * Math.PI / 180;
-      const spd = def.speed * DEG_PER_KM / 3_600_000;
-      vel = { dLat: Math.cos(rad) * spd, dLon: Math.sin(rad) * spd };
-    } else {
-      vel = computeVelocity(wps, evt.type);
-    }
-    const msLeft = EXPIRE_MS - (Date.now() - new Date(evt.ts).getTime());
-    const last = wps[wps.length - 1];
-    trailLines.push(L.polyline(
-      [[last.lat, last.lon],
-       [last.lat + vel.dLat * Math.max(msLeft, 10_000),
-        last.lon + vel.dLon * Math.max(msLeft, 10_000)]],
-      { color: def.color, weight: 1, opacity: 0.18, dashArray: '2 14' }
-    ).addTo(layers.trails));
   }
 
   const obj = { evt, markers, marker: markers[0], trailLines, cancelled: false };
@@ -330,12 +348,15 @@ function _animatePatrol(obj) {
 }
 
 // ── Animation ─────────────────────────────────────────────────────────────
-// Compute current real-world position from elapsed time, then animate forward.
-// Elapsed time is capped at MAX_EXTRAP_MS so old events don't jump far.
+// Compute current real-world position from elapsed time since the report,
+// then hand off to _extrapolateMarker which runs indefinitely at physics speed
+// until the marker is removed or a new update arrives for this threat.
+// MAX_EXTRAP_MS only limits the initial position jump on startup load.
 function _animateMarker(obj, marker, wps, evt) {
   const def = THREATS[evt.type] || THREATS.unknown;
   const speedDegMs = def.speed * DEG_PER_KM / 3_600_000;
 
+  // Cap initial jump to MAX_EXTRAP_MS so old events don't teleport far on load
   const elapsedMs = Math.min(
     Math.max(0, Date.now() - new Date(evt.ts).getTime()),
     MAX_EXTRAP_MS
@@ -343,16 +364,26 @@ function _animateMarker(obj, marker, wps, evt) {
 
   const cardinalBrg = evt.direction != null ? evt.direction : null;
 
-  let extrapVel;
+  // Determine extrapolation velocity:
+  // Priority: (1) parsed cardinal direction, (2) waypoint trajectory,
+  // (3) fallback south — every marker keeps moving, just "guessing"
+  let extrapVel, guessedBrg;
   if (cardinalBrg != null) {
     const rad = cardinalBrg * Math.PI / 180;
-    extrapVel = { dLat: Math.cos(rad) * speedDegMs, dLon: Math.sin(rad) * speedDegMs };
+    extrapVel  = { dLat: Math.cos(rad) * speedDegMs, dLon: Math.sin(rad) * speedDegMs };
+    guessedBrg = cardinalBrg;
   } else if (wps.length >= 2) {
-    extrapVel = computeVelocity(wps, evt.type);
+    extrapVel  = computeVelocity(wps, evt.type);
+    guessedBrg = null;  // will be set from waypoints below
   } else {
-    extrapVel = { dLat: 0, dLon: 0 };
+    // No direction known — default heading for Russian assets entering Ukraine:
+    // most attacks come from north/east, so default bearing is south (180°)
+    const rad  = Math.PI;  // 180°
+    extrapVel  = { dLat: Math.cos(rad) * speedDegMs, dLon: Math.sin(rad) * speedDegMs };
+    guessedBrg = 180;
   }
 
+  // Walk the waypoints to find the current interpolated position
   let curLat, curLon, curBrg;
   if (wps.length >= 2) {
     let distLeft = speedDegMs * elapsedMs;
@@ -373,37 +404,40 @@ function _animateMarker(obj, marker, wps, evt) {
       curLat = b.lat; curLon = b.lon;
     }
     if (pastEnd && distLeft > 0) {
-      const extraMs = distLeft / speedDegMs;
-      curLat += extrapVel.dLat * extraMs;
-      curLon += extrapVel.dLon * extraMs;
+      curLat += extrapVel.dLat * (distLeft / speedDegMs);
+      curLon += extrapVel.dLon * (distLeft / speedDegMs);
     }
   } else {
     const origin = wps[0] || { lat: evt.lat, lon: evt.lon };
     curLat = origin.lat + extrapVel.dLat * elapsedMs;
     curLon = origin.lon + extrapVel.dLon * elapsedMs;
-    curBrg = cardinalBrg != null ? cardinalBrg : 0;
+    curBrg = guessedBrg ?? 0;
   }
 
+  // Cardinal direction always wins for icon heading
   if (cardinalBrg != null) curBrg = cardinalBrg;
+  if (guessedBrg != null && cardinalBrg == null && wps.length < 2) curBrg = guessedBrg;
 
   marker.setLatLng([curLat, curLon]);
-  marker.setIcon(makeIcon(evt.type, evt.status, curBrg));
+  marker.setIcon(makeIcon(evt.type, evt.status, curBrg, evt.count || 1));
 
-  if (extrapVel.dLat !== 0 || extrapVel.dLon !== 0) {
-    _extrapolateMarker(obj, marker, { lat: curLat, lon: curLon }, extrapVel, curBrg);
-  }
+  // Always extrapolate — every marker keeps dead-reckoning until removed
+  _extrapolateMarker(obj, marker, { lat: curLat, lon: curLon }, extrapVel, curBrg, evt);
 }
 
-// Continue moving at constant physics speed until marker is cancelled
-function _extrapolateMarker(obj, marker, origin, vel, brg) {
+// Continue moving at animation speed until marker is cancelled by a new update or expiry.
+// This runs forever — it's the "guessing" phase between Telegram updates.
+// Icon is set once here; only position is updated per frame.
+function _extrapolateMarker(obj, marker, origin, vel, brg, evt) {
   if (obj.cancelled || !threats.has(obj.evt.id)) return;
-  const { evt } = obj;
+  const count = (evt || obj.evt).count || 1;
+  // Set icon once — heading doesn't change during extrapolation
+  if (brg != null) marker.setIcon(makeIcon(obj.evt.type, obj.evt.status, brg, count));
   const t0 = performance.now();
   function step() {
     if (obj.cancelled || !threats.has(obj.evt.id)) return;
     const el = performance.now() - t0;
     marker.setLatLng([origin.lat + vel.dLat * el, origin.lon + vel.dLon * el]);
-    if (brg != null) marker.setIcon(makeIcon(evt.type, evt.status, brg));
     requestAnimationFrame(step);
   }
   requestAnimationFrame(step);
@@ -419,7 +453,22 @@ function updateStats() {
   document.getElementById('c-total').textContent     = totalCount;
   document.getElementById('c-active').textContent    = active;
   document.getElementById('c-destroyed').textContent = destroyed;
+  const nt = document.getElementById('no-threats');
+  if (nt) nt.style.display = threats.size === 0 ? 'flex' : 'none';
 }
+
+// Age-based opacity fading — runs every 30 s
+setInterval(() => {
+  const now = Date.now();
+  for (const [, obj] of threats) {
+    const age = now - new Date(obj.evt.ts).getTime();
+    const op  = age < 5 * 60_000 ? 1 : age < 15 * 60_000 ? 0.65 : 0.35;
+    (obj.markers || (obj.marker ? [obj.marker] : [])).forEach(m => {
+      const el = m.getElement();
+      if (el) el.style.opacity = op;
+    });
+  }
+}, 30_000);
 
 // ── Feed ──────────────────────────────────────────────────────────────────
 function addFeedItem(evt) {
@@ -478,16 +527,11 @@ function applyFilter(el) {
   el.classList.toggle('hidden', !show);
 }
 
-// ── Update countdown ──────────────────────────────────────────────────────
-let nextUpdateAt = null;
-setInterval(() => {
+// ── Update status display ─────────────────────────────────────────────────
+function _setUpdateTxt(text) {
   const el = document.getElementById('update-txt');
-  if (!nextUpdateAt) return;
-  const s = Math.round((nextUpdateAt - Date.now()) / 1000);
-  if (s <= 0) { el.textContent = 'Fetching…'; return; }
-  const m = Math.floor(s / 60), ss = String(s % 60).padStart(2, '0');
-  el.textContent = `Next update ${m}:${ss}`;
-}, 1000);
+  if (el) el.textContent = text;
+}
 
 // ── CSS pulse animation injection ────────────────────────────────────────
 document.head.insertAdjacentHTML('beforeend', `
@@ -522,14 +566,14 @@ function connect() {
     } else if (m.type === 'history') {
       [...m.data].reverse().forEach(handleEvent);
     } else if (m.type === 'next_update') {
-      nextUpdateAt = new Date(m.at).getTime();
+      _setUpdateTxt(m.at === 'live' ? 'Live — instant updates' : 'Loading history…');
     }
   };
 }
 
 function handleEvent(evt) {
-  if (!evt || !evt.id || seenIds.has(evt.id)) return;
-  seenIds.add(evt.id);
+  if (!evt || !evt.id || hasSeen(evt.id)) return;
+  markSeen(evt.id);
   totalCount++;
   try { addThreat(evt); } catch(e) { console.error('addThreat', e, evt); }
   try { addFeedItem(evt); } catch(e) { console.error('addFeedItem', e, evt); }
@@ -573,9 +617,52 @@ function pollEvents() {
   xhr.send();
 }
 
+// ── RAW message feed tab ──────────────────────────────────────────────────
+let rawTab = false;
+
+document.querySelectorAll('.tab-btn').forEach(btn => {
+  btn.addEventListener('click', () => {
+    document.querySelectorAll('.tab-btn').forEach(b => b.classList.remove('active'));
+    btn.classList.add('active');
+    rawTab = btn.dataset.tab === 'raw';
+    document.getElementById('feed').style.display    = rawTab ? 'none' : '';
+    document.getElementById('feed-raw').style.display = rawTab ? '' : 'none';
+  });
+});
+
+function pollRawMessages() {
+  const xhr = new XMLHttpRequest();
+  xhr.onreadystatechange = function() {
+    if (xhr.readyState !== 4 || xhr.status !== 200) return;
+    try {
+      const msgs = JSON.parse(xhr.responseText).messages || [];
+      const el = document.getElementById('feed-raw');
+      if (!el) return;
+      el.innerHTML = '';
+      msgs.forEach(msg => {
+        const time = new Date(msg.ts).toLocaleTimeString('en-US',
+          { hour: '2-digit', minute: '2-digit', hour12: false });
+        const div = document.createElement('div');
+        div.className = 'raw-item ' + (msg.plotted ? 'r-plotted' : 'r-unplotted');
+        div.innerHTML = `<div class="raw-header">
+          <span class="raw-ch">${msg.channel}</span>
+          <span class="raw-time">${time}</span>
+          ${msg.plotted ? '<span class="raw-badge">PLOTTED</span>' : ''}
+        </div>
+        <div class="raw-text">${(msg.text || '').substring(0, 300)}</div>`;
+        el.appendChild(div);
+      });
+    } catch(e) {}
+  };
+  xhr.open('GET', window.location.origin + '/api/messages', true);
+  xhr.send();
+}
+
 // ── Boot ──────────────────────────────────────────────────────────────────
 connect();
 pollEvents();
+pollRawMessages();
+setInterval(pollRawMessages, 30_000);
 setInterval(() => {
   const now = Date.now();
   for (const [id, o] of threats)

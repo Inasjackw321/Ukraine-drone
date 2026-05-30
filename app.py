@@ -7,9 +7,10 @@ Run:  python app.py           (prompts for credentials on first run)
 """
 
 # Auto-update: pull latest code from remote on every launch
-import subprocess, sys
+import subprocess, os as _os
 try:
-    subprocess.run(["git", "pull"], capture_output=True, timeout=10)
+    _repo = _os.path.dirname(_os.path.abspath(__file__))
+    subprocess.run(["git", "-C", _repo, "pull"], capture_output=True, timeout=15)
 except Exception:
     pass
 
@@ -698,14 +699,9 @@ _EN_NUM_RE = re.compile(
 )
 
 CHANNEL_NAMES = {
-    "kpszsu":                  "UA Air Force",
-    "war_monitor":             "War Monitor",
-    "mon1tor_ua":              "Monitor UA",
-    "eradar_ua":               "eRadar UA",
-    "ukrainian_intelligence":  "UA Intelligence",
-    "operativnoZSU":           "UA Armed Forces Ops",
-    "PovitryanaViiskaUA":      "Air Force UA",
-    "air_alert_ua":            "Air Alert UA",
+    "eradar_ua":   "eRadar UA",
+    "kpszsu":      "UA Air Force",
+    "war_monitor": "War Monitor",
 }
 
 # ── Cardinal direction parsing ────────────────────────────────────────────────
@@ -1055,14 +1051,9 @@ if WEB.exists():
 # Telegram polling  (10-minute cycle)
 # ─────────────────────────────────────────────────────────────────────────────
 CHANNELS  = [
+    "eradar_ua",              # eRadar Ukraine
     "kpszsu",                 # Командування Повітряних Сил (UA Air Force)
     "war_monitor",            # War Monitor (English)
-    "mon1tor_ua",             # Monitor Ukraine
-    "eradar_ua",              # eRadar Ukraine
-    "ukrainian_intelligence", # Розвідка України (reference-map source)
-    "operativnoZSU",          # Оперативний ЗСУ
-    "PovitryanaViiskaUA",     # Повітряні Сили ЗСУ
-    "air_alert_ua",           # Air Alert Ukraine
 ]
 POLL_SECS = 30  # only used for the "next update" UI hint
 

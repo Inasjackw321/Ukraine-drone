@@ -3287,7 +3287,7 @@ def parse_message(text: str, channel: str, msg_id: int = 0, msg_date=None, raw_t
 
     # Generic air-alert with no weapon ID — goes to feed only, not the map
     if threat == "unknown":
-        log.debug("[%s] GENERIC ALERT (no weapon ID): %.80s", channel, text.replace("\n", " "))
+        log.info("[%s] NO-WEAPON: %.80s", channel, text.replace("\n", " "))
         return None
 
     locs = find_locations(text)
@@ -3300,7 +3300,7 @@ def parse_message(text: str, channel: str, msg_id: int = 0, msg_date=None, raw_t
             lat, lon = OBLAST_HINTS[key]
             locs = [{"name": hm.group(), "lat": lat, "lon": lon}]
         else:
-            log.debug("[%s] UNPLOTTED: %.80s", channel, text.replace("\n", " "))
+            log.info("[%s] NO-LOCATION (threat=%s): %.80s", channel, threat, text.replace("\n", " "))
             return None
 
     # Status — default "alert" (most channel posts without a status keyword are alerts)

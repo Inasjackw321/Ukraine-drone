@@ -346,12 +346,15 @@ function _animatePatrol(obj) {
 }
 
 // ── Animation ─────────────────────────────────────────────────────────────
-// Compute current real-world position from elapsed time, then animate forward.
-// Elapsed time is capped at MAX_EXTRAP_MS so old events don't jump far.
+// Compute current real-world position from elapsed time since the report,
+// then hand off to _extrapolateMarker which runs indefinitely at physics speed
+// until the marker is removed or a new update arrives for this threat.
+// MAX_EXTRAP_MS only limits the initial position jump on startup load.
 function _animateMarker(obj, marker, wps, evt) {
   const def = THREATS[evt.type] || THREATS.unknown;
   const speedDegMs = def.speed * DEG_PER_KM / 3_600_000;
 
+  // Cap initial jump to MAX_EXTRAP_MS so old events don't teleport far on load
   const elapsedMs = Math.min(
     Math.max(0, Date.now() - new Date(evt.ts).getTime()),
     MAX_EXTRAP_MS
@@ -359,16 +362,26 @@ function _animateMarker(obj, marker, wps, evt) {
 
   const cardinalBrg = evt.direction != null ? evt.direction : null;
 
-  let extrapVel;
+  // Determine extrapolation velocity:
+  // Priority: (1) parsed cardinal direction, (2) waypoint trajectory,
+  // (3) fallback south — every marker keeps moving, just "guessing"
+  let extrapVel, guessedBrg;
   if (cardinalBrg != null) {
     const rad = cardinalBrg * Math.PI / 180;
-    extrapVel = { dLat: Math.cos(rad) * speedDegMs, dLon: Math.sin(rad) * speedDegMs };
+    extrapVel  = { dLat: Math.cos(rad) * speedDegMs, dLon: Math.sin(rad) * speedDegMs };
+    guessedBrg = cardinalBrg;
   } else if (wps.length >= 2) {
-    extrapVel = computeVelocity(wps, evt.type);
+    extrapVel  = computeVelocity(wps, evt.type);
+    guessedBrg = null;  // will be set from waypoints below
   } else {
-    extrapVel = { dLat: 0, dLon: 0 };
+    // No direction known — default heading for Russian assets entering Ukraine:
+    // most attacks come from north/east, so default bearing is south (180°)
+    const rad  = Math.PI;  // 180°
+    extrapVel  = { dLat: Math.cos(rad) * speedDegMs, dLon: Math.sin(rad) * speedDegMs };
+    guessedBrg = 180;
   }
 
+  // Walk the waypoints to find the current interpolated position
   let curLat, curLon, curBrg;
   if (wps.length >= 2) {
     let distLeft = speedDegMs * elapsedMs;
@@ -389,37 +402,38 @@ function _animateMarker(obj, marker, wps, evt) {
       curLat = b.lat; curLon = b.lon;
     }
     if (pastEnd && distLeft > 0) {
-      const extraMs = distLeft / speedDegMs;
-      curLat += extrapVel.dLat * extraMs;
-      curLon += extrapVel.dLon * extraMs;
+      curLat += extrapVel.dLat * (distLeft / speedDegMs);
+      curLon += extrapVel.dLon * (distLeft / speedDegMs);
     }
   } else {
     const origin = wps[0] || { lat: evt.lat, lon: evt.lon };
     curLat = origin.lat + extrapVel.dLat * elapsedMs;
     curLon = origin.lon + extrapVel.dLon * elapsedMs;
-    curBrg = cardinalBrg != null ? cardinalBrg : 0;
+    curBrg = guessedBrg ?? 0;
   }
 
+  // Cardinal direction always wins for icon heading
   if (cardinalBrg != null) curBrg = cardinalBrg;
+  if (guessedBrg != null && cardinalBrg == null && wps.length < 2) curBrg = guessedBrg;
 
   marker.setLatLng([curLat, curLon]);
-  marker.setIcon(makeIcon(evt.type, evt.status, curBrg));
+  marker.setIcon(makeIcon(evt.type, evt.status, curBrg, evt.count || 1));
 
-  if (extrapVel.dLat !== 0 || extrapVel.dLon !== 0) {
-    _extrapolateMarker(obj, marker, { lat: curLat, lon: curLon }, extrapVel, curBrg);
-  }
+  // Always extrapolate — every marker keeps dead-reckoning until removed
+  _extrapolateMarker(obj, marker, { lat: curLat, lon: curLon }, extrapVel, curBrg, evt);
 }
 
-// Continue moving at constant physics speed until marker is cancelled
-function _extrapolateMarker(obj, marker, origin, vel, brg) {
+// Continue moving at physics speed until marker is cancelled by a new update or expiry.
+// This runs forever — it's the "guessing" phase between Telegram updates.
+function _extrapolateMarker(obj, marker, origin, vel, brg, evt) {
   if (obj.cancelled || !threats.has(obj.evt.id)) return;
-  const { evt } = obj;
   const t0 = performance.now();
+  const count = (evt || obj.evt).count || 1;
   function step() {
     if (obj.cancelled || !threats.has(obj.evt.id)) return;
     const el = performance.now() - t0;
     marker.setLatLng([origin.lat + vel.dLat * el, origin.lon + vel.dLon * el]);
-    if (brg != null) marker.setIcon(makeIcon(evt.type, evt.status, brg));
+    if (brg != null) marker.setIcon(makeIcon(obj.evt.type, obj.evt.status, brg, count));
     requestAnimationFrame(step);
   }
   requestAnimationFrame(step);

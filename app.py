@@ -1054,25 +1054,43 @@ CHANNEL_NAMES = {
 # Diagonal cardinals checked first (more specific than plain N/S/E/W).
 # These are TRAVEL direction (where the drone is going).
 _TRAVEL_DIR_RE: list[tuple[int, re.Pattern]] = [
-    (45,  re.compile(r"північно.?схід|north.?east|ne\s+course|northeast(?:ern)?\s+(?:course|direction)", re.I)),
-    (135, re.compile(r"південно.?схід|south.?east|se\s+course|southeast(?:ern)?\s+(?:course|direction)", re.I)),
-    (225, re.compile(r"південно.?захід|south.?west|sw\s+course|southwest(?:ern)?\s+(?:course|direction)", re.I)),
-    (315, re.compile(r"північно.?захід|north.?west|nw\s+course|northwest(?:ern)?\s+(?:course|direction)", re.I)),
-    (0,   re.compile(r"курсом\s+на\s+північ|north(?:ern)?\s+course|heading\s+north|на\s+північ", re.I)),
-    (90,  re.compile(r"курсом\s+на\s+схід|east(?:ern)?\s+course|heading\s+east|на\s+схід", re.I)),
-    (180, re.compile(r"курсом\s+на\s+південь|south(?:ern)?\s+course|heading\s+south|на\s+південь", re.I)),
-    (270, re.compile(r"курсом\s+на\s+захід|west(?:ern)?\s+course|heading\s+west|на\s+захід", re.I)),
+    (45,  re.compile(r"північно.?схід|north.?east(?:ern)?\s+(?:course|direction|bound)|heading\s+north.?east|\bheading[:\s]+NE\b|прямує\s+на\s+північ.?схід|рухається\s+на\s+північ.?схід|летить\s+на\s+північ.?схід", re.I)),
+    (135, re.compile(r"південно.?схід|south.?east(?:ern)?\s+(?:course|direction|bound)|heading\s+south.?east|\bheading[:\s]+SE\b|прямує\s+на\s+південь.?схід|рухається\s+на\s+південь.?схід|летить\s+на\s+південь.?схід", re.I)),
+    (225, re.compile(r"південно.?захід|south.?west(?:ern)?\s+(?:course|direction|bound)|heading\s+south.?west|\bheading[:\s]+SW\b|прямує\s+на\s+південь.?захід|рухається\s+на\s+південь.?захід|летить\s+на\s+південь.?захід", re.I)),
+    (315, re.compile(r"північно.?захід|north.?west(?:ern)?\s+(?:course|direction|bound)|heading\s+north.?west|\bheading[:\s]+NW\b|прямує\s+на\s+північ.?захід|рухається\s+на\s+північ.?захід|летить\s+на\s+північ.?захід", re.I)),
+    # Simple cardinals — require explicit motion/course context to avoid matching position phrases like "in the north of X"
+    (0,   re.compile(
+        r"курсом?\s+на\s+північ|у\s+напрямку\s+на?\s+північ|в\s+напрямку\s+на?\s+північ"
+        r"|heading\s+north(?:ward)?|north(?:ern)?\s+(?:course|direction|bound)"
+        r"|\bheading[:\s]+N\b"
+        r"|прямує\s+на\s+північ|рухається\s+на\s+північ|летить\s+на\s+північ|flies?\s+north", re.I)),
+    (90,  re.compile(
+        r"курсом?\s+на\s+схід|у\s+напрямку\s+на?\s+схід|в\s+напрямку\s+на?\s+схід"
+        r"|heading\s+east(?:ward)?|east(?:ern)?\s+(?:course|direction|bound)"
+        r"|\bheading[:\s]+E\b"
+        r"|прямує\s+на\s+схід|рухається\s+на\s+схід|летить\s+на\s+схід", re.I)),
+    (180, re.compile(
+        r"курсом?\s+на\s+південь|у\s+напрямку\s+на?\s+південь|в\s+напрямку\s+на?\s+південь"
+        r"|heading\s+south(?:ward)?|south(?:ern)?\s+(?:course|direction|bound)"
+        r"|\bheading[:\s]+S\b"
+        r"|прямує\s+на\s+південь|рухається\s+на\s+південь|летить\s+на\s+південь", re.I)),
+    (270, re.compile(
+        r"курсом?\s+на\s+захід|у\s+напрямку\s+на?\s+захід|в\s+напрямку\s+на?\s+захід"
+        r"|heading\s+west(?:ward)?|west(?:ern)?\s+(?:course|direction|bound)"
+        r"|\bheading[:\s]+W\b"
+        r"|прямує\s+на\s+захід|рухається\s+на\s+захід|летить\s+на\s+захід", re.I)),
 ]
 # Origin direction — drone came FROM this direction, so travel = +180°
+# Includes "to the north of X" patterns which mean the threat is positioned north of X (→ heading south)
 _ORIGIN_DIR_RE: list[tuple[int, re.Pattern]] = [
-    (45,  re.compile(r"з\s+(?:боку\s+)?північного\s+сходу|from\s+the\s+north.?east", re.I)),
-    (135, re.compile(r"з\s+(?:боку\s+)?південного\s+сходу|from\s+the\s+south.?east", re.I)),
-    (225, re.compile(r"з\s+(?:боку\s+)?південного\s+заходу|from\s+the\s+south.?west", re.I)),
-    (315, re.compile(r"з\s+(?:боку\s+)?північного\s+заходу|from\s+the\s+north.?west", re.I)),
-    (90,  re.compile(r"зі?\s+сходу|з\s+(?:боку\s+)?сходу|from\s+the\s+east", re.I)),
-    (270, re.compile(r"зі?\s+заходу|з\s+(?:боку\s+)?заходу|from\s+the\s+west", re.I)),
-    (0,   re.compile(r"з\s+(?:боку\s+)?півночі|from\s+the\s+north", re.I)),
-    (180, re.compile(r"з\s+(?:боку\s+)?півдня|from\s+the\s+south", re.I)),
+    (45,  re.compile(r"з\s+(?:боку\s+)?північного\s+сходу|from\s+the\s+north.?east|to\s+(?:the\s+)?north.?east\s+of|на\s+північ.?схід\s+від", re.I)),
+    (135, re.compile(r"з\s+(?:боку\s+)?південного\s+сходу|from\s+the\s+south.?east|to\s+(?:the\s+)?south.?east\s+of|на\s+південь.?схід\s+від", re.I)),
+    (225, re.compile(r"з\s+(?:боку\s+)?південного\s+заходу|from\s+the\s+south.?west|to\s+(?:the\s+)?south.?west\s+of|на\s+південь.?захід\s+від", re.I)),
+    (315, re.compile(r"з\s+(?:боку\s+)?північного\s+заходу|from\s+the\s+north.?west|to\s+(?:the\s+)?north.?west\s+of|на\s+північ.?захід\s+від", re.I)),
+    (90,  re.compile(r"зі?\s+сходу|з\s+(?:боку\s+)?сходу|from\s+the\s+east|to\s+(?:the\s+)?east\s+of|на\s+схід\s+від", re.I)),
+    (270, re.compile(r"зі?\s+заходу|з\s+(?:боку\s+)?заходу|from\s+the\s+west|to\s+(?:the\s+)?west\s+of|на\s+захід\s+від", re.I)),
+    (0,   re.compile(r"з\s+(?:боку\s+)?півночі|from\s+the\s+north|to\s+(?:the\s+)?north\s+of|на\s+північ\s+від", re.I)),
+    (180, re.compile(r"з\s+(?:боку\s+)?півдня|from\s+the\s+south|to\s+(?:the\s+)?south\s+of|на\s+південь\s+від", re.I)),
 ]
 
 # Regex that splits combined multi-threat messages into individual segments.

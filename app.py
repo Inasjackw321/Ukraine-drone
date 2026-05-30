@@ -480,6 +480,12 @@ THREAT_RE: list[tuple[re.Pattern, str]] = [
     (re.compile(r"х-69|x-69",               re.I), "x59"),
     (re.compile(r"онікс|oniks",              re.I), "oniks"),
     (re.compile(r"калібр|kalibr|caliber",   re.I), "kalibr"),
+    # Glide bombs — КАБ / ФАБ+УМПК (high priority, before generic "bomb/ракет")
+    (re.compile(
+        r"каб-\d+|каб\b|kab-\d+|\bkab\b|"
+        r"фаб-\d+|фаб\b|fab-\d+|\bfab\b|умпк|umpk|"
+        r"керован[аі]\s+авіабомб|glide\s*bomb|guided\s*bomb|guided\s*aerial",
+        re.I), "glidebomb"),
     (re.compile(r"шахед|shaheed|shahed",    re.I), "shahed"),
     (re.compile(r"герань|geran",             re.I), "geran"),
     (re.compile(r"балістич|ballistic",       re.I), "ballistic"),
@@ -528,7 +534,7 @@ TO_RE = re.compile(
     re.I,
 )
 COUNT_RE = re.compile(
-    r"(\d+)\s*(?:шахед|бпла|бпл|ракет|дрон|калібр|кинджал|uav|uavs|drone|drones|missile|missiles|kar)",
+    r"(\d+)\s*(?:шахед|бпла|бпл|ракет|дрон|калібр|кинджал|каб|фаб|uav|uavs|drone|drones|missile|missiles|kar|kab|fab)",
     re.I,
 )
 GROUP_RE = re.compile(

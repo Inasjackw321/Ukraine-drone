@@ -4,21 +4,22 @@
 // ── Threat definitions ────────────────────────────────────────────────────
 // speed_kmh used for extrapolation after last waypoint
 const THREATS = {
-  shahed:    { label: 'Shahed',    color: '#f97316', glow: '#f97316', speed: 150,  cat: 'drone'   },
-  geran:     { label: 'Geranium',  color: '#f97316', glow: '#f97316', speed: 150,  cat: 'drone'   },
-  drone:     { label: 'UAV',      color: '#60a5fa', glow: '#3b82f6', speed: 150,  cat: 'drone'   },
-  kar:       { label: 'KAR',       color: '#fb923c', glow: '#ea580c', speed: 200,  cat: 'drone'   },
-  kalibr:    { label: 'Kalibr',    color: '#ef4444', glow: '#dc2626', speed: 700,  cat: 'missile' },
-  x101:      { label: 'X-101',     color: '#f87171', glow: '#ef4444', speed: 780,  cat: 'missile' },
-  x59:       { label: 'X-59',      color: '#fb923c', glow: '#ea580c', speed: 900,  cat: 'missile' },
-  x22:       { label: 'X-22',      color: '#f43f5e', glow: '#e11d48', speed: 1000, cat: 'missile' },
-  oniks:     { label: 'Oniks',     color: '#e879f9', glow: '#c026d3', speed: 2500, cat: 'missile' },
-  kinzhal:   { label: 'Kinzhal',   color: '#c084fc', glow: '#a855f7', speed: 3000, cat: 'missile' },
-  iskander:  { label: 'Iskander',  color: '#fbbf24', glow: '#d97706', speed: 1500, cat: 'missile' },
-  ballistic: { label: 'Ballistic', color: '#eab308', glow: '#ca8a04', speed: 1200, cat: 'missile' },
-  missile:   { label: 'Missile',   color: '#ef4444', glow: '#dc2626', speed: 700,  cat: 'missile' },
-  unknown:   { label: 'Unknown',   color: '#94a3b8', glow: '#64748b', speed: 300,  cat: 'unknown' },
-  aviation:  { label: 'Aviation',  color: '#38bdf8', glow: '#0ea5e9', speed: 800,  cat: 'aviation' },
+  shahed:    { label: 'Shahed',     color: '#f97316', glow: '#f97316', speed: 150,  cat: 'drone'      },
+  geran:     { label: 'Geranium',   color: '#f97316', glow: '#f97316', speed: 150,  cat: 'drone'      },
+  drone:     { label: 'UAV',        color: '#60a5fa', glow: '#3b82f6', speed: 150,  cat: 'drone'      },
+  kar:       { label: 'KAR',        color: '#fb923c', glow: '#ea580c', speed: 200,  cat: 'drone'      },
+  glidebomb: { label: 'Glide Bomb', color: '#f59e0b', glow: '#d97706', speed: 500,  cat: 'glidebomb'  },
+  kalibr:    { label: 'Kalibr',     color: '#ef4444', glow: '#dc2626', speed: 700,  cat: 'missile'    },
+  x101:      { label: 'X-101',      color: '#f87171', glow: '#ef4444', speed: 780,  cat: 'missile'    },
+  x59:       { label: 'X-59',       color: '#fb923c', glow: '#ea580c', speed: 900,  cat: 'missile'    },
+  x22:       { label: 'X-22',       color: '#f43f5e', glow: '#e11d48', speed: 1000, cat: 'missile'    },
+  oniks:     { label: 'Oniks',      color: '#e879f9', glow: '#c026d3', speed: 2500, cat: 'missile'    },
+  kinzhal:   { label: 'Kinzhal',    color: '#c084fc', glow: '#a855f7', speed: 3000, cat: 'missile'    },
+  iskander:  { label: 'Iskander',   color: '#fbbf24', glow: '#d97706', speed: 1500, cat: 'missile'    },
+  ballistic: { label: 'Ballistic',  color: '#eab308', glow: '#ca8a04', speed: 1200, cat: 'missile'    },
+  missile:   { label: 'Missile',    color: '#ef4444', glow: '#dc2626', speed: 700,  cat: 'missile'    },
+  unknown:   { label: 'Unknown',    color: '#94a3b8', glow: '#64748b', speed: 300,  cat: 'unknown'    },
+  aviation:  { label: 'Aviation',   color: '#38bdf8', glow: '#0ea5e9', speed: 800,  cat: 'aviation'   },
 };
 
 const STATUS_CLASS = {
@@ -66,26 +67,28 @@ const layers = {
 // The outer ring color shows status; the inner fill shows threat type.
 
 const SHAPES = {
-  // drones: wide triangle
-  drone:   'M8,1 L15,14 L8,11 L1,14 Z',
-  shahed:  'M8,1 L15,14 L8,11 L1,14 Z',
-  geran:   'M8,1 L15,14 L8,11 L1,14 Z',
-  kar:     'M8,1 L15,14 L8,11 L1,14 Z',
-  // cruise missiles: slim dart
-  missile: 'M8,1 L13,15 L8,12 L3,15 Z',
-  kalibr:  'M8,1 L13,15 L8,12 L3,15 Z',
-  x101:    'M8,1 L13,15 L8,12 L3,15 Z',
-  x59:     'M8,1 L13,15 L8,12 L3,15 Z',
-  x22:     'M8,1 L13,15 L8,12 L3,15 Z',
-  oniks:   'M8,1 L13,15 L8,12 L3,15 Z',
-  // kinzhal: ultra-slim needle
-  kinzhal: 'M8,0 L11,16 L8,13 L5,16 Z',
-  // ballistic / iskander: teardrop
-  iskander:  'M8,1 C12,1 14,7 14,12 C14,15 11,16 8,16 C5,16 2,15 2,12 C2,7 4,1 8,1 Z',
-  ballistic: 'M8,1 C12,1 14,7 14,12 C14,15 11,16 8,16 C5,16 2,15 2,12 C2,7 4,1 8,1 Z',
-  unknown:  'M8,2 L14,14 L8,11 L2,14 Z',
+  // drones: swept-wing delta shape
+  drone:     'M8,1 L15,13 L11,11 L8,14 L5,11 L1,13 Z',
+  shahed:    'M8,1 L15,13 L11,11 L8,14 L5,11 L1,13 Z',
+  geran:     'M8,1 L15,13 L11,11 L8,14 L5,11 L1,13 Z',
+  kar:       'M8,1 L15,13 L11,11 L8,14 L5,11 L1,13 Z',
+  // cruise missiles: slim sleek dart with notched tail
+  missile:   'M8,0 L12,12 L10,11 L8,15 L6,11 L4,12 Z',
+  kalibr:    'M8,0 L12,12 L10,11 L8,15 L6,11 L4,12 Z',
+  x101:      'M8,0 L12,12 L10,11 L8,15 L6,11 L4,12 Z',
+  x59:       'M8,0 L12,12 L10,11 L8,15 L6,11 L4,12 Z',
+  x22:       'M8,0 L12,12 L10,11 L8,15 L6,11 L4,12 Z',
+  oniks:     'M8,0 L12,12 L10,11 L8,15 L6,11 L4,12 Z',
+  // kinzhal: ultra-slim needle with double notch
+  kinzhal:   'M8,0 L10,14 L8,11 L6,14 Z',
+  // ballistic / iskander: rounded warhead silhouette
+  iskander:  'M8,1 C11,1 13,5 13,10 C13,14 11,15 8,15 C5,15 3,14 3,10 C3,5 5,1 8,1 Z',
+  ballistic: 'M8,1 C11,1 13,5 13,10 C13,14 11,15 8,15 C5,15 3,14 3,10 C3,5 5,1 8,1 Z',
+  // glide bomb: swept diamond — short broad wing
+  glidebomb: 'M8,2 L15,7 L12,8 L8,15 L4,8 L1,7 Z',
+  unknown:   'M8,2 L14,13 L8,10 L2,13 Z',
   // top-down aircraft silhouette
-  aviation: 'M8,0 L10,5 L16,6 L16,8 L10,8 L11,16 L8,14 L5,16 L6,8 L0,8 L0,6 L6,5 Z',
+  aviation:  'M8,0 L10,5 L16,6 L16,8 L10,8 L11,16 L8,14 L5,16 L6,8 L0,8 L0,6 L6,5 Z',
 };
 
 const RING_COLORS = {
@@ -94,25 +97,42 @@ const RING_COLORS = {
 };
 
 function makeIcon(type, status, bearingDeg, count) {
-  const def    = THREATS[type] || THREATS.unknown;
-  const shape  = SHAPES[type]  || SHAPES.unknown;
-  const ring   = RING_COLORS[status] || RING_COLORS.unknown;
+  const def   = THREATS[type] || THREATS.unknown;
+  const shape = SHAPES[type]  || SHAPES.unknown;
+  const ring  = RING_COLORS[status] || RING_COLORS.unknown;
   const isActive = status === 'moving' || status === 'launch' || status === 'alert';
-  const pulse  = isActive ? 'style="animation:iconPulse 1.8s infinite"' : '';
-  const size   = type === 'kinzhal' ? 48 : (def.cat === 'missile' ? 44 : 52);
+  const pulse = isActive ? 'style="animation:iconPulse 1.8s infinite"' : '';
+  const size  = type === 'kinzhal' ? 50 : (def.cat === 'glidebomb' ? 54 : def.cat === 'missile' ? 46 : 54);
   const n = count > 1 ? count : 0;
+  const uid = Math.random().toString(36).slice(2, 7);
 
+  // Lighter tint of the fill color for the gradient highlight
   const svg = `
     <svg width="${size}" height="${size}" viewBox="0 0 20 22"
-         style="transform:rotate(${bearingDeg}deg);filter:drop-shadow(0 0 5px ${def.glow}99)"
-         ${pulse}>
-      <g transform="scale(1.25) translate(0,-1)">
-        <path d="${shape}" fill="${def.color}" opacity=".93"/>
-        <circle cx="8" cy="8" r="7" fill="none" stroke="${ring}" stroke-width="1.3" opacity=".8"/>
+         style="transform:rotate(${bearingDeg}deg)" ${pulse}>
+      <defs>
+        <radialGradient id="g${uid}" cx="40%" cy="30%" r="65%">
+          <stop offset="0%"   stop-color="#ffffff" stop-opacity="0.35"/>
+          <stop offset="100%" stop-color="${def.color}" stop-opacity="0"/>
+        </radialGradient>
+        <filter id="f${uid}" x="-40%" y="-40%" width="180%" height="180%">
+          <feGaussianBlur in="SourceGraphic" stdDeviation="1.8" result="blur"/>
+          <feColorMatrix in="blur" type="matrix"
+            values="1 0 0 0 0  0 1 0 0 0  0 0 1 0 0  0 0 0 14 -5" result="glow"/>
+          <feMerge><feMergeNode in="glow"/><feMergeNode in="SourceGraphic"/></feMerge>
+        </filter>
+      </defs>
+      <g transform="scale(1.25) translate(0,-1)" filter="url(#f${uid})">
+        <path d="${shape}" fill="${def.color}" opacity="0.95"
+              stroke="${def.glow}" stroke-width="0.4" stroke-opacity="0.6"/>
+        <path d="${shape}" fill="url(#g${uid})"/>
+        <circle cx="8" cy="8" r="7" fill="none" stroke="${ring}"
+                stroke-width="1.5" opacity="0.9"
+                stroke-dasharray="${status === 'destroyed' ? '3 2' : 'none'}"/>
       </g>
       ${n ? `<text x="10" y="21" text-anchor="middle" font-family="monospace"
                font-size="5.5" font-weight="bold" fill="white"
-               stroke="#080c10" stroke-width="0.8">×${n}</text>` : ''}
+               stroke="#080c10" stroke-width="1">×${n}</text>` : ''}
     </svg>`;
 
   return L.divIcon({

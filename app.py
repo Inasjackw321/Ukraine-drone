@@ -3274,14 +3274,26 @@ def _det_count(seed: str, lo: int, hi: int) -> int:
     return lo + (h % (hi - lo + 1))
 
 
+# Latin→Cyrillic lookalike map — Telegram channels mix scripts to evade keyword filters
+_LAT2CYR = str.maketrans("ABCEHKMOPTXYaecop", "АВСЕНКМОРТХУаесор")
+
+
+def _cyr_normalize(text: str) -> str:
+    """Replace common Latin homoglyphs with Cyrillic equivalents."""
+    return text.translate(_LAT2CYR)
+
+
 def parse_message(text: str, channel: str, msg_id: int = 0, msg_date=None, raw_text: str = "") -> dict | None:
     if not text or len(text) < 10:
         return None
 
+    # Normalize Latin homoglyphs → Cyrillic so mixed-script abbreviations match
+    norm = _cyr_normalize(text)
+
     # Detect primary threat type
     threat = "unknown"
     for pat, name in THREAT_RE:
-        if pat.search(text):
+        if pat.search(norm) or pat.search(text):
             threat = name
             break
 
@@ -3290,11 +3302,11 @@ def parse_message(text: str, channel: str, msg_id: int = 0, msg_date=None, raw_t
         log.info("[%s] NO-WEAPON: %.80s", channel, text.replace("\n", " "))
         return None
 
-    locs = find_locations(text)
+    locs = find_locations(norm) or find_locations(text)
 
     # Fallback: if LOCS matching found nothing, try oblast-level hint
     if not locs:
-        hm = _OBLAST_HINT_RE.search(text)
+        hm = _OBLAST_HINT_RE.search(norm) or _OBLAST_HINT_RE.search(text)
         if hm:
             key = hm.group().lower()
             lat, lon = OBLAST_HINTS[key]

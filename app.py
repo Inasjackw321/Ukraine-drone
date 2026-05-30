@@ -3698,24 +3698,19 @@ async def _telegram_loop(cfg: dict) -> None:
             if not evt:
                 continue
             waypoints = evt.get("waypoints", [])
-            if len(waypoints) <= 1:
-                evt["id"] = f"{msg.id}_{i}_0"
-                log.info("[%s] %-10s  ×%-2d  %s", slug, evt["type"], evt.get("count", 1), evt.get("location", "?"))
-                push_event(evt)
-                any_plotted = True
-            else:
-                for j, wp in enumerate(waypoints):
-                    sub = {
-                        **evt,
-                        "id":        f"{msg.id}_{i}_{j}",
-                        "lat":       wp["lat"],
-                        "lon":       wp["lon"],
-                        "location":  wp["name"],
-                        "waypoints": [wp],
-                    }
-                    log.info("[%s] %-10s  %s", slug, sub["type"], wp["name"])
-                    push_event(sub)
-                    any_plotted = True
+            evt["id"] = f"{msg.id}_{i}_0"
+            if len(waypoints) > 1:
+                # Multiple locations: origin = first, destination = last (for animation heading)
+                # Don't create separate events per waypoint — one marker at origin only
+                if not evt.get("to_lat"):
+                    last = waypoints[-1]
+                    evt["to_lat"] = last["lat"]
+                    evt["to_lon"] = last["lon"]
+                    if not evt.get("to"):
+                        evt["to"] = last["name"]
+            log.info("[%s] %-10s  ×%-2d  %s", slug, evt["type"], evt.get("count", 1), evt.get("location", "?"))
+            push_event(evt)
+            any_plotted = True
 
         if any_plotted:
             raw_entry["plotted"] = True

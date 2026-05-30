@@ -65,70 +65,67 @@ const layers = {
 };
 
 // ── SVG icon factory ──────────────────────────────────────────────────────
-// All icons are arrow shapes pointing "up" (north=0°), rotated via CSS.
-// The outer ring color shows status; the inner fill shows threat type.
+// Simple directional arrow shapes in a 16×16 viewBox, pointing north (0°),
+// rotated by bearing via CSS. No glow/filter — crisp small icons like the
+// reference intelligence maps.
 
 const SHAPES = {
-  // DRONE / SHAHED — wide flat delta wing from above (top-down UAV, ~2:1 wide/tall)
-  drone:     'M8,0 L15,8 L12,11 L8,9 L4,11 L1,8 Z',
-  shahed:    'M8,0 L15,8 L12,11 L8,9 L4,11 L1,8 Z',
-  geran:     'M8,0 L15,8 L12,11 L8,9 L4,11 L1,8 Z',
-  kar:       'M8,0 L15,8 L12,11 L8,9 L4,11 L1,8 Z',
-  // CRUISE MISSILE — slim elongated dart with swept fins (~4:1 tall/wide)
-  missile:   'M8,0 L10,12 L9,10 L8,15 L7,10 L6,12 Z',
-  kalibr:    'M8,0 L10,12 L9,10 L8,15 L7,10 L6,12 Z',
-  x101:      'M8,0 L10,12 L9,10 L8,15 L7,10 L6,12 Z',
-  x59:       'M8,0 L10,12 L9,10 L8,15 L7,10 L6,12 Z',
-  x22:       'M8,0 L10,12 L9,10 L8,15 L7,10 L6,12 Z',
-  oniks:     'M8,0 L10,12 L9,10 L8,15 L7,10 L6,12 Z',
-  // KINZHAL — ultra-slim hypersonic spike/needle
-  kinzhal:   'M8,0 L9.5,14 L8,11 L6.5,14 Z',
-  // ISKANDER / BALLISTIC — blunt rounded warhead cone
-  iskander:  'M8,1 C13,1 14,7 14,12 C14,15 11,16 8,16 C5,16 2,15 2,12 C2,7 3,1 8,1 Z',
-  ballistic: 'M8,1 C13,1 14,7 14,12 C14,15 11,16 8,16 C5,16 2,15 2,12 C2,7 3,1 8,1 Z',
-  // GLIDE BOMB — wide swept diamond (wider than drone)
-  glidebomb: 'M8,2 L16,7 L13,9 L8,15 L3,9 L0,7 Z',
+  // DRONE / SHAHED — broad arrowhead (wide, flat, clearly a delta wing)
+  drone:     'M8,0 L16,14 L8,9 L0,14 Z',
+  shahed:    'M8,0 L16,14 L8,9 L0,14 Z',
+  geran:     'M8,0 L16,14 L8,9 L0,14 Z',
+  kar:       'M8,0 L16,14 L8,9 L0,14 Z',
+  // CRUISE MISSILE — narrow dart (slim, elongated)
+  missile:   'M8,0 L11,16 L8,11 L5,16 Z',
+  kalibr:    'M8,0 L11,16 L8,11 L5,16 Z',
+  x101:      'M8,0 L11,16 L8,11 L5,16 Z',
+  x59:       'M8,0 L11,16 L8,11 L5,16 Z',
+  x22:       'M8,0 L11,16 L8,11 L5,16 Z',
+  oniks:     'M8,0 L11,16 L8,11 L5,16 Z',
+  // KINZHAL — ultra-slim spike
+  kinzhal:   'M8,0 L9.5,16 L8,12 L6.5,16 Z',
+  // ISKANDER / BALLISTIC — slightly wider dart, blunt nose
+  iskander:  'M8,1 L13,16 L8,11 L3,16 Z',
+  ballistic: 'M8,1 L13,16 L8,11 L3,16 Z',
+  // GLIDE BOMB — diamond (wide swept wing)
+  glidebomb: 'M8,0 L16,8 L8,16 L0,8 Z',
   // UNKNOWN — simple triangle
-  unknown:   'M8,2 L14,13 L8,10 L2,13 Z',
-  // AVIATION — top-down aircraft silhouette
+  unknown:   'M8,0 L16,14 L8,9 L0,14 Z',
+  // AVIATION — top-down cross/aircraft
   aviation:  'M8,0 L10,5 L16,6 L16,8 L10,8 L11,16 L8,14 L5,16 L6,8 L0,8 L0,6 L6,5 Z',
 };
 
-const RING_COLORS = {
-  moving: '#f97316', launch: '#ef4444',
-  alert:  '#facc15', destroyed: '#22c55e', unknown: '#64748b',
-};
-
 function makeIcon(type, status, bearingDeg, count) {
-  const def   = THREATS[type] || THREATS.unknown;
-  const shape = SHAPES[type]  || SHAPES.unknown;
-  const ring  = RING_COLORS[status] || RING_COLORS.unknown;
+  const def  = THREATS[type] || THREATS.unknown;
+  const shape = SHAPES[type] || SHAPES.unknown;
   const isActive = status === 'moving' || status === 'launch' || status === 'alert';
-  const pulse = isActive ? 'style="animation:iconPulse 1.8s infinite"' : '';
-  const size  = def.cat === 'drone' ? 56 : def.cat === 'missile' ? 42 : def.cat === 'glidebomb' ? 52 : 48;
+  const isDead   = status === 'destroyed';
+  // Drone wider, missile slimmer, aviation bigger
+  const size = def.cat === 'drone' ? 30 : def.cat === 'missile' ? 24 : def.cat === 'aviation' ? 34 : 28;
   const n = count > 1 ? count : 0;
-  const dashArr = status === 'destroyed' ? '3 2' : 'none';
+  const fill    = isDead ? '#64748b' : def.color;
+  const outline = isDead ? '#22c55e' : '#000000aa';
+  const anim    = isActive ? 'animation:iconPulse 2s infinite' : '';
 
-  const svg = `<svg width="${size}" height="${size}" viewBox="0 0 20 22"
-    style="transform:rotate(${bearingDeg}deg);filter:drop-shadow(0 0 4px ${def.glow}99)" ${pulse}>
-    <g transform="scale(1.2) translate(0.3,-0.5)">
-      <path d="${shape}" fill="${def.color}" opacity="0.95"
-            stroke="${def.glow}" stroke-width="0.5" stroke-opacity="0.7"/>
-      <circle cx="8" cy="8" r="7" fill="none" stroke="${ring}"
-              stroke-width="1.6" opacity="0.9"
-              stroke-dasharray="${dashArr}"/>
-    </g>
-    ${n ? `<text x="10" y="21" text-anchor="middle" font-family="monospace"
-            font-size="5.5" font-weight="bold" fill="white"
-            stroke="#080c10" stroke-width="1">×${n}</text>` : ''}
-  </svg>`;
+  // Rotating SVG arrow — no glow, no ring, crisp like a map symbol
+  const html = `<div style="position:relative;width:${size}px;height:${size}px">
+    <svg width="${size}" height="${size}" viewBox="0 0 16 16"
+         style="transform:rotate(${bearingDeg}deg);overflow:visible;${anim}">
+      <path d="${shape}" fill="${fill}" stroke="${outline}" stroke-width="0.8"
+            stroke-linejoin="round" opacity="${isDead ? 0.6 : 1}"/>
+    </svg>
+    ${n ? `<span style="position:absolute;bottom:-11px;left:50%;transform:translateX(-50%);
+             font:bold 9px/1 monospace;color:${def.color};
+             text-shadow:-1px -1px 0 #000,1px -1px 0 #000,-1px 1px 0 #000,1px 1px 0 #000;
+             white-space:nowrap">×${n}</span>` : ''}
+  </div>`;
 
   return L.divIcon({
-    html: svg,
+    html,
     className: '',
-    iconSize: [size, size],
+    iconSize:   [size, size],
     iconAnchor: [size / 2, size / 2],
-    popupAnchor: [0, -size / 2],
+    popupAnchor:[0, -(size / 2 + 4)],
   });
 }
 

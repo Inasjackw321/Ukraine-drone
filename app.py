@@ -409,7 +409,7 @@ LOCS: dict[str, tuple[float, float]] = {
     "enerhodar":         (47.50, 34.65),   "nova kakhovka":     (46.76, 33.38),
     "henichesk":         (46.17, 34.82),   "novomoskovsk":      (48.63, 35.23),
     "pavlohrad":         (48.53, 35.87),   "vovchansk":         (50.29, 36.94),
-    "chuhuiv":           (49.83, 36.68),   "izium":             (49.21, 37.27),
+    "chuhuiv":           (49.83, 36.68),
     "lozova":            (48.89, 36.32),   "balakliya":         (49.46, 36.85),
     "velykyi burluk":    (50.02, 37.17),   "zmiiv":             (49.68, 36.37),
 
@@ -422,6 +422,50 @@ LOCS: dict[str, tuple[float, float]] = {
     "мик. обл":   (46.98, 31.99),  "він. обл":   (49.23, 28.47),
     "черн. обл":  (51.50, 31.29),  "черн.обл":   (51.50, 31.29),
     "льв. обл":   (49.84, 24.03),  "хмельн. обл":(49.42, 26.99),
+
+    # ── English city names missing from transliterations above ───────────────
+    # Zhytomyr oblast
+    "korosten":          (50.95, 28.65),  "berdychiv":        (49.90, 28.60),
+    "novograd-volynsky": (50.60, 27.63),  "novograd volynsky":(50.60, 27.63),
+    "ovruch":            (51.32, 28.81),  "malyn":            (50.77, 29.27),
+    # Kyiv oblast / suburbs
+    "irpin":             (50.52, 30.25),  "bucha":            (50.55, 30.23),
+    "hostomel":          (50.59, 30.27),  "vasylkiv":         (50.18, 30.32),
+    "borodyanka":        (50.65, 29.94),  "makariv":          (50.46, 29.81),
+    "vyshneve":          (50.38, 30.37),  "boyarka":          (50.34, 30.29),
+    "pereyaslav":        (50.07, 31.45),  "berezan":          (50.33, 31.47),
+    # Chernihiv oblast
+    "pryluky":           (50.60, 32.39),  "borzna":           (51.25, 32.41),
+    "mena":              (51.52, 32.21),  "sedniv":           (51.67, 31.60),
+    "oster":             (50.95, 30.88),  "bakhmach":         (51.17, 32.83),
+    # Sumy oblast
+    "hlukhiv":           (51.67, 33.91),  "seredyna-buda":    (52.19, 34.03),
+    "seredyna buda":     (52.19, 34.03),  "krolevets":        (51.54, 33.38),
+    "putyvl":            (51.34, 33.87),  "bilopillia":       (51.15, 34.31),
+    "bilopillya":        (51.15, 34.31),  "trostyanets":      (50.49, 34.97),
+    "akhtyrka":          (50.31, 34.90),
+    # Kharkiv oblast
+    "kupyansk":          (49.71, 37.61),  "dvorichna":        (49.85, 37.71),
+    "derhachi":          (50.14, 36.14),  "zolochiv":         (50.02, 36.03),
+    "balakliia":         (49.46, 36.85),  "shevchenkove":     (49.71, 37.19),
+    # Zaporizhzhia oblast
+    "orikhiv":           (47.56, 35.78),  "tokmak":           (47.25, 35.71),
+    "polohy":            (47.48, 36.26),  "huliaipole":       (47.66, 36.26),
+    # Dnipro oblast
+    "kamianske":         (48.51, 34.62),  "synelnykove":      (48.32, 35.52),
+    "pidhorodne":        (48.56, 35.14),
+    # Mykolaiv oblast
+    "voznesensk":        (47.56, 31.33),  "bashtanka":        (47.40, 32.44),
+    "snihurivka":        (47.08, 32.80),
+    # Kherson oblast
+    "skadovsk":          (46.12, 32.91),  "kakhovka":         (46.82, 33.48),
+    "hola prystan":      (46.53, 32.54),
+    # Common English spelling variants
+    "zaporizhia":        (47.84, 35.14),  "zaporozhye":       (47.84, 35.14),
+    "nikolaev":          (46.98, 31.99),  "nikolayev":        (46.98, 31.99),
+    "kharkov":           (49.99, 36.23),  "kiev":             (50.45, 30.52),
+    "dnepropetrovsk":    (48.46, 35.05),  "dniepropetrovsk":  (48.46, 35.05),
+    "lugansk":           (48.57, 39.31),  "donetsk":          (48.02, 37.80),
 }
 
 # Pre-sorted once for find_locations() — longest key first for greedy matching
@@ -443,6 +487,23 @@ def find_locations(text: str) -> list[dict]:
     tl = text.lower()
     results: list[dict] = []
     covered: list[tuple[int, int]] = []
+
+    # ── Pass 0: English preposition pattern — "over/in/near [City]" ──────────
+    # Runs before exact match so that multi-word city names (e.g. "Bila Tserkva")
+    # get a chance to be found via capitalisation even if the full phrase isn't
+    # in LOCS directly.
+    _EN_PREP_RE = re.compile(
+        r"\b(?:over|in|near|above|around|at|toward|towards|from|hitting|"
+        r"struck|strikes|targeting|targets|spotted over|detected over|"
+        r"heading (?:to|toward|towards))\s+([A-Z][a-zA-Z]+(?:[ \-][A-Z][a-zA-Z]+)*)",
+    )
+    for m in _EN_PREP_RE.finditer(text):
+        candidate = m.group(1).lower()
+        if candidate in LOCS:
+            s, e = m.start(1), m.end(1)
+            if not any(cs <= s and e <= ce for cs, ce in covered):
+                covered.append((s, e))
+                results.append({"name": m.group(1), "lat": LOCS[candidate][0], "lon": LOCS[candidate][1]})
 
     # ── Pass 1: exact match ───────────────────────────────────────────────────
     for key in _LOCS_SORTED:

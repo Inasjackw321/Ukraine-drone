@@ -59,6 +59,10 @@ logging.basicConfig(
     level=logging.INFO,
 )
 log = logging.getLogger("ukraine-drone")
+# Silence Telethon's internal update/difference messages — they're not errors
+logging.getLogger("telethon").setLevel(logging.WARNING)
+logging.getLogger("telethon.network").setLevel(logging.WARNING)
+logging.getLogger("telethon.client").setLevel(logging.WARNING)
 
 HERE   = Path(__file__).parent
 WEB    = HERE / "web"

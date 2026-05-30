@@ -809,7 +809,7 @@ async def _telegram_loop(cfg: dict) -> None:
     last_ids: dict[str, int] = {s: 0 for s in entities.values()}
 
     while True:
-        cutoff = datetime.now(timezone.utc) - timedelta(seconds=900)  # 15 min startup window
+        cutoff = datetime.now(timezone.utc) - timedelta(seconds=1200)  # 20 min startup window
 
         for eid, slug in entities.items():
             try:

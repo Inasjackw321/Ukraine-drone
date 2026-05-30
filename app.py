@@ -3877,7 +3877,7 @@ def main() -> None:
                 width=1440, height=900, resizable=True,
                 background_color="#080c10",
             )
-            webview.start(private_mode=False)
+            webview.start(private_mode=True)
             return
         except Exception as e:
             if not isinstance(e, ImportError):

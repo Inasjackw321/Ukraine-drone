@@ -3587,8 +3587,10 @@ async def _telegram_loop(cfg: dict) -> None:
     for slug in cfg.get("channels", CHANNELS):
         try:
             ent = await client.get_entity(slug)
-            entities[ent.id] = slug
-            log.info("  channel ready: @%s", slug)
+            # Store both positive and negative IDs — Telegram channels use both depending on context
+            entities[ent.id]  = slug
+            entities[-ent.id] = slug
+            log.info("  channel ready: @%s  (id=%d)", slug, ent.id)
         except Exception as e:
             log.warning("  can't resolve @%s — %s", slug, e)
 
@@ -3693,10 +3695,15 @@ async def _telegram_loop(cfg: dict) -> None:
     # ── 2. Real-time handler — fires instantly on every new message ───────────
     @client.on(events.NewMessage(chats=list(entities.keys())))
     async def _on_new(event):
-        slug = entities.get(event.chat_id, "unknown")
+        # Telegram channels return negative chat_id in events; entities dict stores positive IDs
+        cid  = event.chat_id
+        slug = entities.get(cid) or entities.get(-cid) or entities.get(abs(cid)) or "unknown"
         msg  = event.message
         # Skip anything already ingested during startup load
         if msg.id in seen_startup:
+            return
+        if slug == "unknown":
+            log.debug("live message from untracked chat %d — skipping", cid)
             return
         log.info("[%s] live message #%d", slug, msg.id)
         await _process_msg(msg, slug)

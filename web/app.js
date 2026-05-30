@@ -30,8 +30,13 @@ const STATUS_CLASS = {
 // 1 degree latitude ≈ 111 km — used to convert km/h to deg/ms
 const DEG_PER_KM = 1 / 111;
 
-// Threat expires after this long (disappears from map)
-const EXPIRE_MS = 30 * 60 * 1000;
+// Per-category expiry times
+function _expireMs(type) {
+  const cat = (THREATS[type] || THREATS.unknown).cat;
+  if (cat === 'glidebomb') return  5 * 60 * 1000;   // KAB/FAB: 5 min
+  if (cat === 'missile')   return 10 * 60 * 1000;   // missiles: 10 min
+  return 30 * 60 * 1000;                             // drones/aviation: 30 min
+}
 // How far back in time to extrapolate position on initial load.
 // Matches the 20-min history window so a drone reported 20 min ago
 // appears at its current estimated position, not its original reported spot.
@@ -288,7 +293,7 @@ function addThreat(evt) {
         _animateMarker(obj, markers[i], offsetWps, evt);
       });
     }
-    const ttl = EXPIRE_MS - (Date.now() - new Date(evt.ts).getTime());
+    const ttl = _expireMs(evt.type) - (Date.now() - new Date(evt.ts).getTime());
     setTimeout(() => removeThreat(evt.id), Math.max(ttl, 5000));
   }
   updateStats();
@@ -455,8 +460,9 @@ function updateStats() {
   }
   const cTotal = document.getElementById('c-total');
   if (cTotal) cTotal.textContent = totalCount;
-  document.getElementById('c-active').textContent    = active;
-  document.getElementById('c-destroyed').textContent = destroyed;
+  document.getElementById('c-active').textContent = active;
+  const cDest = document.getElementById('c-destroyed');
+  if (cDest) cDest.textContent = destroyed;
   const nt = document.getElementById('no-threats');
   if (nt) nt.style.display = threats.size === 0 ? 'flex' : 'none';
 }
@@ -670,5 +676,5 @@ setInterval(pollRawMessages, 30_000);
 setInterval(() => {
   const now = Date.now();
   for (const [id, o] of threats)
-    if (now - new Date(o.evt.ts).getTime() > EXPIRE_MS + 5000) removeThreat(id);
+    if (now - new Date(o.evt.ts).getTime() > _expireMs(o.evt.type) + 5000) removeThreat(id);
 }, 60_000);

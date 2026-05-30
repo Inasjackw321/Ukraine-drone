@@ -3343,8 +3343,8 @@ def parse_message(text: str, channel: str, msg_id: int = 0, msg_date=None, raw_t
     if not text or len(text) < 10:
         return None
 
-    # Build search corpus: translated + original raw, both lowercased + homoglyph-normalised
-    norm_en  = _cyr_normalize(text).lower()
+    # Build search corpus: translated (English, keep Latin as-is) + raw Cyrillic (normalise homoglyphs)
+    norm_en  = text.lower()
     norm_raw = _cyr_normalize(raw_text).lower() if raw_text else ""
     corpus   = norm_en + " " + norm_raw   # search both together
 

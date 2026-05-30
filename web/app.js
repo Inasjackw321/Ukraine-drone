@@ -224,7 +224,7 @@ function addThreat(evt) {
 
   const wps  = (evt.waypoints || []).filter(w => w.lat && w.lon);
   const def  = THREATS[evt.type] || THREATS.unknown;
-  const count = Math.min(evt.count || 1, 6);
+  const count = Math.min(evt.count || 1, 12);
 
   // Initial bearing from text direction, or last waypoint segment
   let brg = evt.direction != null ? evt.direction : 0;

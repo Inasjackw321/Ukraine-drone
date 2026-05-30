@@ -639,12 +639,30 @@ COUNT_RE = re.compile(
     r"(\d+)\s*(?:шахед|бпла|бпл|ракет|дрон|калібр|кинджал|каб|фаб|uav|uavs|drone|drones|missile|missiles|kar|kab|fab)",
     re.I,
 )
+# Range like "4-6 drones" or "від 4 до 6" — take upper bound
+_RANGE_RE = re.compile(
+    r"(\d+)\s*[-–—]\s*(\d+)\s*(?:шахед|бпла|дрон|ракет|uav|uavs|drone|drones|missile|missiles)",
+    re.I,
+)
+# "more than 5" / "at least 3" / "over 10" / "5+"
+_AT_LEAST_RE = re.compile(
+    r"(?:more\s+than|at\s+least|over|не\s+менше|понад|більше\s+(?:ніж\s+)?)\s*(\d+)"
+    r"|(\d+)\s*\+",
+    re.I,
+)
 GROUP_RE = re.compile(
-    r"груп[аиі]|кількох|декількох|декілька|кілька|кільком|group|several|multiple",
+    r"груп[аиі]|кількох|декількох|декілька|кілька|кільком|group|several|multiple|swarm",
+    re.I,
+)
+# Bare plural noun with no preceding number — implies at least 2
+_PLURAL_RE = re.compile(
+    r"\b(?:uavs|drones|missiles|rockets|shaheds|geraniums|"
+    r"бпла(?:ми|х|ів)|дрони|дронів|дронами|ракети|ракет(?:ами|ах)|"
+    r"шахеди|шахедів|шахедами|літаки|гелікоптери)\b",
     re.I,
 )
 
-# Ukrainian number words → integer (for "шість БПЛА" style counts)
+# Ukrainian number words → integer
 _UA_NUMS: dict[str, int] = {
     "один": 1, "одна": 1, "одного": 1, "одну": 1,
     "два": 2, "дві": 2, "двох": 2,
@@ -656,11 +674,26 @@ _UA_NUMS: dict[str, int] = {
     "вісім": 8, "восьми": 8,
     "дев'ять": 9, "дев'яти": 9,
     "десять": 10, "десяти": 10,
-    "дванадцять": 12, "шістнадцять": 16,
+    "одинадцять": 11, "дванадцять": 12,
+    "п'ятнадцять": 15, "шістнадцять": 16,
+    "двадцять": 20, "тридцять": 30,
 }
 _UA_NUM_RE = re.compile(
     r"\b(" + "|".join(re.escape(k) for k in sorted(_UA_NUMS, key=len, reverse=True)) + r")\b"
     r"\s*(?:шахед|бпла|дрон|ракет|kalibr|uav|uavs|drone|drones|missile|missiles|kar)",
+    re.I,
+)
+
+# English number words → integer
+_EN_NUMS: dict[str, int] = {
+    "one": 1, "two": 2, "three": 3, "four": 4, "five": 5,
+    "six": 6, "seven": 7, "eight": 8, "nine": 9, "ten": 10,
+    "eleven": 11, "twelve": 12, "dozen": 12, "thirteen": 13,
+    "fourteen": 14, "fifteen": 15, "sixteen": 16, "twenty": 20,
+}
+_EN_NUM_RE = re.compile(
+    r"\b(" + "|".join(re.escape(k) for k in sorted(_EN_NUMS, key=len, reverse=True)) + r")\b"
+    r"\s*(?:uav|uavs|drone|drones|missile|missiles|shahed|rocket|rockets|aircraft)",
     re.I,
 )
 
@@ -790,18 +823,29 @@ def parse_message(text: str, channel: str, msg_id: int = 0, msg_date=None) -> di
             status = st
             break
 
-    # Count
-    m = COUNT_RE.search(text)
-    if m:
+    # Count — priority: range > explicit digit > UA word > EN word > at-least > group > plural > 1
+    mr = _RANGE_RE.search(text)
+    m  = COUNT_RE.search(text)
+    mw = _UA_NUM_RE.search(text.lower())
+    me = _EN_NUM_RE.search(text.lower())
+    ma = _AT_LEAST_RE.search(text)
+    if mr:
+        count = int(mr.group(2))                          # upper bound of range
+    elif m:
         count = int(m.group(1))
+    elif mw:
+        count = _UA_NUMS.get(mw.group(1), 1)
+    elif me:
+        count = _EN_NUMS.get(me.group(1).lower(), 1)
+    elif ma:
+        n = ma.group(1) or ma.group(2)
+        count = int(n) + 1 if ma.group(1) else int(n)    # "more than 5" → 6, "5+" → 5
+    elif GROUP_RE.search(text):
+        count = 3                                          # conservative: group = at least 3
+    elif _PLURAL_RE.search(text):
+        count = 2                                          # plural noun = at least 2
     else:
-        mw = _UA_NUM_RE.search(text.lower())
-        if mw:
-            count = _UA_NUMS.get(mw.group(1), 1)
-        elif GROUP_RE.search(text):
-            count = random.randint(4, 10)
-        else:
-            count = 1
+        count = 1
 
     # Directions (named from/to locations)
     frm = (FROM_RE.search(text) or type("", (), {"group": lambda s, i: None})()).group(1)

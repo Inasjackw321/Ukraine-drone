@@ -27,13 +27,17 @@ from pathlib import Path
 def _check_deps() -> None:
     import importlib.util as _ilu
     required = {
-        "fastapi":        "pip install fastapi",
-        "uvicorn":        "pip install uvicorn[standard]",
-        "telethon":       "pip install telethon",
-        "aiofiles":       "pip install aiofiles",
-        "websockets":     "pip install websockets",
-        "deep_translator":"pip install deep-translator",
+        "fastapi":    "pip install fastapi",
+        "uvicorn":    "pip install uvicorn[standard]",
+        "telethon":   "pip install telethon",
+        "aiofiles":   "pip install aiofiles",
+        "websockets": "pip install websockets",
     }
+    # Soft dependency — app works without it, messages just show in original language
+    import importlib.util as _ilu2
+    if _ilu2.find_spec("deep_translator") is None:
+        print("\n  ⚠  deep-translator not installed — messages won't be translated.")
+        print("     Run:  pip install deep-translator\n")
     missing = [f"  {pkg:12s}  →  {cmd}" for pkg, cmd in required.items()
                if _ilu.find_spec(pkg) is None]
     if missing:
@@ -84,7 +88,7 @@ async def _translate(text: str) -> str:
         )
         out = result or text
     except Exception as exc:
-        log.debug("Translation skipped: %s", exc)
+        log.warning("Translation failed: %s", exc)
         out = text
     _trans_cache[key] = out
     return out

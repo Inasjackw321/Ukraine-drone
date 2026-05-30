@@ -30,15 +30,12 @@ const STATUS_CLASS = {
 // 1 degree latitude ≈ 111 km — used to convert km/h to deg/ms
 const DEG_PER_KM = 1 / 111;
 
-// Scale factor applied to all animation speeds.
-// Physical speeds are correct for initial position estimation;
-// this makes the on-screen drift visually subtle and realistic-feeling.
-const ANIM_SPEED_SCALE = 0.25;
-
 // Threat expires after this long (disappears from map)
 const EXPIRE_MS = 30 * 60 * 1000;
-// Cap how far back in time we extrapolate position on load (avoids huge jumps)
-const MAX_EXTRAP_MS = 3 * 60 * 1000;
+// How far back in time to extrapolate position on initial load.
+// Matches the 20-min history window so a drone reported 20 min ago
+// appears at its current estimated position, not its original reported spot.
+const MAX_EXTRAP_MS = 20 * 60 * 1000;
 
 // ── Map ───────────────────────────────────────────────────────────────────
 const map = L.map('map', {
@@ -170,7 +167,7 @@ function computeVelocity(waypoints, type) {
 
   // Normalise then scale to animation speed (deg-lat per ms)
   const speedKmh    = (THREATS[type] || THREATS.unknown).speed;
-  const speedDegMs  = speedKmh * DEG_PER_KM / 3_600_000 * ANIM_SPEED_SCALE;
+  const speedDegMs  = speedKmh * DEG_PER_KM / 3_600_000;
 
   return { dLat: (dlat / mag) * speedDegMs, dLon: (dlon / mag) * speedDegMs };
 }
@@ -324,7 +321,7 @@ function _animatePatrol(obj) {
   const { evt } = obj;
   const marker = (obj.markers && obj.markers[0]) || obj.marker;
   const route   = _patrolRoute(evt.lat, evt.lon);
-  const speedMs = (THREATS[evt.type] || THREATS.aviation).speed * DEG_PER_KM / 3_600_000 * ANIM_SPEED_SCALE;
+  const speedMs = (THREATS[evt.type] || THREATS.aviation).speed * DEG_PER_KM / 3_600_000;
 
   function step(si, t0) {
     if (obj.cancelled || !threats.has(evt.id)) return;
@@ -357,7 +354,7 @@ function _animatePatrol(obj) {
 // MAX_EXTRAP_MS only limits the initial position jump on startup load.
 function _animateMarker(obj, marker, wps, evt) {
   const def = THREATS[evt.type] || THREATS.unknown;
-  const speedDegMs = def.speed * DEG_PER_KM / 3_600_000 * ANIM_SPEED_SCALE;
+  const speedDegMs = def.speed * DEG_PER_KM / 3_600_000;
 
   // Cap initial jump to MAX_EXTRAP_MS so old events don't teleport far on load
   const elapsedMs = Math.min(

@@ -352,13 +352,28 @@ LOCS: dict[str, tuple[float, float]] = {
     "velykyi burluk":    (50.02, 37.17),   "zmiiv":             (49.68, 36.37),
 }
 
+# Pre-sorted once for find_locations() — longest key first for greedy matching
+_LOCS_SORTED = sorted(LOCS.keys(), key=len, reverse=True)
+
+# Cyrillic word pattern used in stem-matching pass
+_CYR_WORD_RE = re.compile(r'[а-яґєіїА-ЯҐЄІЇ]{5,}')
+
 
 def find_locations(text: str) -> list[dict]:
-    """Return list of {name, lat, lon} found in text (longest match wins)."""
+    """Return list of {name, lat, lon} found in text.
+
+    Pass 1 — exact substring match (fast, covers explicit LOCS entries).
+    Pass 2 — stem match: strips up to 6 trailing chars from Cyrillic words
+              to handle Ukrainian case endings and adjectival forms not
+              explicitly listed (e.g. "харківського" → "харків",
+              "конотопом" → "конотоп", "краматорського" → "краматорськ").
+    """
     tl = text.lower()
     results: list[dict] = []
     covered: list[tuple[int, int]] = []
-    for key in sorted(LOCS, key=len, reverse=True):
+
+    # ── Pass 1: exact match ───────────────────────────────────────────────────
+    for key in _LOCS_SORTED:
         i = tl.find(key)
         if i == -1:
             continue
@@ -366,8 +381,28 @@ def find_locations(text: str) -> list[dict]:
         if any(s <= i and end <= e for s, e in covered):
             continue
         covered.append((i, end))
-        lat, lon = LOCS[key]
-        results.append({"name": text[i:end], "lat": lat, "lon": lon})
+        results.append({"name": text[i:end], "lat": LOCS[key][0], "lon": LOCS[key][1]})
+
+    # ── Pass 2: stem match for words not already covered ─────────────────────
+    for m in _CYR_WORD_RE.finditer(tl):
+        word = m.group()
+        s, e = m.start(), m.end()
+        if any(cs <= s and e <= ce for cs, ce in covered):
+            continue
+        # Try trimming 1–6 chars; stop at the first LOCS key found
+        for trim in range(1, min(7, len(word) - 3)):
+            stem = word[:-trim]
+            if len(stem) < 4:
+                break
+            if stem in LOCS:
+                covered.append((s, e))
+                results.append({
+                    "name": text[s:e],
+                    "lat": LOCS[stem][0],
+                    "lon": LOCS[stem][1],
+                })
+                break
+
     return results
 
 
@@ -708,7 +743,7 @@ async def _telegram_loop(cfg: dict) -> None:
     last_ids: dict[str, int] = {s: 0 for s in entities.values()}
 
     while True:
-        cutoff = datetime.now(timezone.utc) - timedelta(seconds=1800)  # 30 min = EXPIRE_MS
+        cutoff = datetime.now(timezone.utc) - timedelta(seconds=900)  # 15 min startup window
 
         for eid, slug in entities.items():
             try:

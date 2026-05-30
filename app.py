@@ -3610,6 +3610,7 @@ async def _telegram_loop(cfg: dict) -> None:
 
         # Translate to English — used for both display and NLP parsing
         text = await _translate(raw)
+        log.info("[%s] TEXT: %.100s", slug, text.replace("\n", " "))
 
         raw_entry: dict = {
             "ts":      msg_date.isoformat(),

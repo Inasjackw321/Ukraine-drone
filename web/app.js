@@ -205,6 +205,20 @@ function _formationOffsets(count, bearingDeg) {
   return offsets;
 }
 
+// Return a base offset so new threat doesn't overlap existing threats at same location
+function _overlapOffset(lat, lon, brg) {
+  const THRESH = 0.07;  // ~8 km
+  let n = 0;
+  for (const [, o] of threats) {
+    if (Math.abs(o.evt.lat - lat) < THRESH && Math.abs(o.evt.lon - lon) < THRESH) n++;
+  }
+  if (n === 0) return [0, 0];
+  // Shift perpendicular to heading so stacked threats fan out sideways
+  const perpRad = (brg + 90) * Math.PI / 180;
+  const shift = 0.065 * n;
+  return [Math.sin(perpRad) * shift, Math.cos(perpRad) * shift];
+}
+
 function addThreat(evt) {
   if (!evt.lat || !evt.lon) return;
   if (threats.has(evt.id)) removeThreat(evt.id);
@@ -221,11 +235,12 @@ function addThreat(evt) {
   }
 
   const offsets = _formationOffsets(count, brg);
+  const baseOff = _overlapOffset(evt.lat, evt.lon, brg);
   const markers = [];
   const trailLines = [];
 
   offsets.forEach((off) => {
-    const lat = evt.lat + off[0], lon = evt.lon + off[1];
+    const lat = evt.lat + off[0] + baseOff[0], lon = evt.lon + off[1] + baseOff[1];
     let m;
     try {
       m = L.marker([lat, lon], {
@@ -260,19 +275,22 @@ function addThreat(evt) {
   const obj = { evt, markers, marker: markers[0], trailLines, cancelled: false };
   threats.set(evt.id, obj);
 
-  if (evt.status !== 'destroyed') {
+  if (evt.status === 'destroyed') {
+    // Show briefly then remove — destroyed markers don't animate
+    setTimeout(() => removeThreat(evt.id), 8000);
+  } else {
     if (evt.type === 'aviation') {
       _animatePatrol(obj);
     } else {
       offsets.forEach((off, i) => {
-        const offsetWps = wps.map(w => ({ lat: w.lat + off[0], lon: w.lon + off[1], name: w.name }));
+        const bOff = baseOff;
+        const offsetWps = wps.map(w => ({ lat: w.lat + off[0] + bOff[0], lon: w.lon + off[1] + bOff[1], name: w.name }));
         _animateMarker(obj, markers[i], offsetWps, evt);
       });
     }
+    const ttl = EXPIRE_MS - (Date.now() - new Date(evt.ts).getTime());
+    setTimeout(() => removeThreat(evt.id), Math.max(ttl, 5000));
   }
-
-  const ttl = EXPIRE_MS - (Date.now() - new Date(evt.ts).getTime());
-  setTimeout(() => removeThreat(evt.id), Math.max(ttl, 5000));
   updateStats();
 }
 
@@ -435,7 +453,8 @@ function updateStats() {
     if (o.evt.status === 'destroyed') destroyed++;
     else active++;
   }
-  document.getElementById('c-total').textContent     = totalCount;
+  const cTotal = document.getElementById('c-total');
+  if (cTotal) cTotal.textContent = totalCount;
   document.getElementById('c-active').textContent    = active;
   document.getElementById('c-destroyed').textContent = destroyed;
   const nt = document.getElementById('no-threats');

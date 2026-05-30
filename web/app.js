@@ -509,16 +509,11 @@ function applyFilter(el) {
   el.classList.toggle('hidden', !show);
 }
 
-// ── Update countdown ──────────────────────────────────────────────────────
-let nextUpdateAt = null;
-setInterval(() => {
+// ── Update status display ─────────────────────────────────────────────────
+function _setUpdateTxt(text) {
   const el = document.getElementById('update-txt');
-  if (!nextUpdateAt) return;
-  const s = Math.round((nextUpdateAt - Date.now()) / 1000);
-  if (s <= 0) { el.textContent = 'Fetching…'; return; }
-  const m = Math.floor(s / 60), ss = String(s % 60).padStart(2, '0');
-  el.textContent = `Next update ${m}:${ss}`;
-}, 1000);
+  if (el) el.textContent = text;
+}
 
 // ── CSS pulse animation injection ────────────────────────────────────────
 document.head.insertAdjacentHTML('beforeend', `
@@ -553,7 +548,7 @@ function connect() {
     } else if (m.type === 'history') {
       [...m.data].reverse().forEach(handleEvent);
     } else if (m.type === 'next_update') {
-      nextUpdateAt = new Date(m.at).getTime();
+      _setUpdateTxt(m.at === 'live' ? 'Live — instant updates' : 'Loading history…');
     }
   };
 }

@@ -900,12 +900,12 @@ CHANNELS  = [
     "PovitryanaViiskaUA",     # Повітряні Сили ЗСУ
     "air_alert_ua",           # Air Alert Ukraine
 ]
-POLL_SECS = 30  # 30 seconds
+POLL_SECS = 30  # only used for the "next update" UI hint
 
 
 async def _telegram_loop(cfg: dict) -> None:
     try:
-        from telethon import TelegramClient
+        from telethon import TelegramClient, events
     except ImportError:
         log.error("telethon not installed — pip install telethon")
         return
@@ -920,7 +920,6 @@ async def _telegram_loop(cfg: dict) -> None:
     phone = tg.get("phone", "")
 
     async def _code_cb() -> str:
-        # Must use terminal input here — tkinter can't be called safely from threads
         print(f"\n  [Telegram] Check your phone ({phone}) for a verification code.")
         return input("  Code: ").strip()
 
@@ -940,77 +939,95 @@ async def _telegram_loop(cfg: dict) -> None:
         except Exception as e:
             log.warning("  can't resolve @%s — %s", slug, e)
 
-    last_ids: dict[str, int] = {s: 0 for s in entities.values()}
+    # ── shared processing logic ───────────────────────────────────────────────
+    def _process_msg(msg, slug: str, *, is_history: bool = False) -> bool:
+        """Parse one Telethon message and push events. Returns True if plotted."""
+        if not msg.date:
+            return False
+        msg_date = msg.date if msg.date.tzinfo else msg.date.replace(tzinfo=timezone.utc)
 
-    while True:
-        cutoff = datetime.now(timezone.utc) - timedelta(seconds=1200)  # 20 min startup window
+        raw = msg.message or ""
+        if not raw.strip():
+            return False
 
-        for eid, slug in entities.items():
-            try:
-                msgs = await client.get_messages(eid, limit=100)
-            except Exception as e:
-                log.warning("fetch error %s: %s", slug, e)
+        raw_entry: dict = {
+            "ts":      msg_date.isoformat(),
+            "channel": CHANNEL_NAMES.get(slug, slug),
+            "text":    raw[:400],
+            "plotted": False,
+        }
+        _raw_messages.appendleft(raw_entry)
+
+        segments = split_segments(raw) or [raw]
+        any_plotted = False
+        for i, seg in enumerate(segments):
+            evt = parse_message(seg, slug, msg.id, msg_date=msg_date)
+            if not evt:
                 continue
+            waypoints = evt.get("waypoints", [])
+            if len(waypoints) <= 1:
+                evt["id"] = f"{msg.id}_{i}_0"
+                log.info("[%s] %-10s  %s", slug, evt["type"], evt.get("location", "?"))
+                push_event(evt)
+                any_plotted = True
+            else:
+                for j, wp in enumerate(waypoints):
+                    sub = {
+                        **evt,
+                        "id":        f"{msg.id}_{i}_{j}",
+                        "lat":       wp["lat"],
+                        "lon":       wp["lon"],
+                        "location":  wp["name"],
+                        "waypoints": [wp],
+                    }
+                    log.info("[%s] %-10s  %s", slug, sub["type"], wp["name"])
+                    push_event(sub)
+                    any_plotted = True
+        if any_plotted:
+            raw_entry["plotted"] = True
+        return any_plotted
 
-            for msg in reversed(msgs or []):
-                if not msg.date:
-                    continue
-                # Telethon may return naive or aware datetimes — normalise to UTC
-                msg_date = msg.date if msg.date.tzinfo else msg.date.replace(tzinfo=timezone.utc)
-                if msg_date < cutoff:
-                    continue  # older than 30 minutes, skip
-                if msg.id <= last_ids[slug]:
-                    continue  # already processed
-                last_ids[slug] = max(last_ids[slug], msg.id)
+    # ── 1. Initial history load (last 20 minutes) ─────────────────────────────
+    cutoff = datetime.now(timezone.utc) - timedelta(seconds=1200)
+    seen_startup: set[int] = set()  # track IDs already pushed during startup
 
-                # Track every raw message for the /api/messages feed
-                raw = msg.message or ""
-                raw_entry: dict = {
-                    "ts":      msg_date.isoformat(),
-                    "channel": CHANNEL_NAMES.get(slug, slug),
-                    "text":    raw[:400],
-                    "plotted": False,
-                }
-                _raw_messages.appendleft(raw_entry)
+    for eid, slug in entities.items():
+        try:
+            msgs = await client.get_messages(eid, limit=100)
+        except Exception as e:
+            log.warning("history fetch error %s: %s", slug, e)
+            continue
 
-                # Split combined messages into individual segments, then
-                # emit ONE event per location so every city gets its own icon.
-                segments = split_segments(raw) or [raw]
-                any_plotted = False
-                for i, seg in enumerate(segments):
-                    evt = parse_message(seg, slug, msg.id, msg_date=msg_date)
-                    if not evt:
-                        continue
-                    waypoints = evt.get("waypoints", [])
-                    if len(waypoints) <= 1:
-                        evt["id"] = f"{msg.id}_{i}_0"
-                        log.info("[%s] %-10s  %s", slug, evt["type"], evt.get("location", "?"))
-                        push_event(evt)
-                        any_plotted = True
-                    else:
-                        # Multiple locations in one segment → separate icon per city
-                        for j, wp in enumerate(waypoints):
-                            sub = {
-                                **evt,
-                                "id":        f"{msg.id}_{i}_{j}",
-                                "lat":       wp["lat"],
-                                "lon":       wp["lon"],
-                                "location":  wp["name"],
-                                "waypoints": [wp],
-                            }
-                            log.info("[%s] %-10s  %s", slug, sub["type"], wp["name"])
-                            push_event(sub)
-                            any_plotted = True
-                if any_plotted:
-                    raw_entry["plotted"] = True
+        for msg in reversed(msgs or []):
+            if not msg.date:
+                continue
+            msg_date = msg.date if msg.date.tzinfo else msg.date.replace(tzinfo=timezone.utc)
+            if msg_date < cutoff:
+                continue
+            seen_startup.add(msg.id)
+            _process_msg(msg, slug, is_history=True)
 
-        nxt = (datetime.now(timezone.utc) + timedelta(seconds=POLL_SECS)).isoformat()
-        if _loop and _loop.is_running():
-            asyncio.run_coroutine_threadsafe(
-                _broadcast({"type": "next_update", "at": nxt}), _loop
-            )
-        log.info("Next Telegram poll in %ds", POLL_SECS)
-        await asyncio.sleep(POLL_SECS)
+    log.info("History load complete — switching to real-time event mode")
+
+    # Signal "live" to the UI
+    if _loop and _loop.is_running():
+        asyncio.run_coroutine_threadsafe(
+            _broadcast({"type": "next_update", "at": "live"}), _loop
+        )
+
+    # ── 2. Real-time handler — fires instantly on every new message ───────────
+    @client.on(events.NewMessage(chats=list(entities.keys())))
+    async def _on_new(event):
+        slug = entities.get(event.chat_id, "unknown")
+        msg  = event.message
+        # Skip anything already ingested during startup load
+        if msg.id in seen_startup:
+            return
+        log.info("[%s] live message #%d", slug, msg.id)
+        _process_msg(msg, slug)
+
+    # ── 3. Keep the connection alive indefinitely ─────────────────────────────
+    await client.run_until_disconnected()
 
 
 def _run_telegram(cfg: dict) -> None:

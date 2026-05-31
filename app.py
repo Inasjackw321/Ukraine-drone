@@ -3135,7 +3135,8 @@ THREAT_RE: list[tuple[re.Pattern, str]] = [
     (re.compile(r"бпла|дрон|uav\b|uavs\b|unmanned aerial", re.I), "drone"),
     (re.compile(
         r"літак|авіац|винищувач|штурмовик|бомбард|гелікоптер|"
-        r"f-16|су-\d+|міг-\d+|helicopter|aircraft|aviation|tactical aviation",
+        r"f-16|су-\d+|міг-\d+|helicopter|aircraft|aviation|tactical aviation|"
+        r"\bjets?\b|\bfighters?\b|\bbombers?\b",
         re.I), "aviation"),
 ]
 
@@ -3475,11 +3476,6 @@ def parse_message(text: str, channel: str, msg_id: int = 0, msg_date=None, raw_t
             threat = name
             break
 
-    # Generic air-alert with no weapon ID — goes to feed only, not the map
-    if threat == "unknown":
-        log.info("[%s] NO-WEAPON: %.80s", channel, text.replace("\n", " "))
-        return None
-
     # Find locations — try translated first, fall back to raw
     locs = find_locations(text) or (find_locations(raw_text) if raw_text else [])
     locs = _refine_locations(locs, text)
@@ -3494,6 +3490,21 @@ def parse_message(text: str, channel: str, msg_id: int = 0, msg_date=None, raw_t
             locs = [{"name": hm.group(), "lat": lat, "lon": lon}]
         else:
             log.info("[%s] NO-LOCATION (threat=%s): %.80s", channel, threat, text.replace("\n", " "))
+            return None
+
+    # If no weapon type detected but we have a location and a count/movement signal → assume drone.
+    # Channels post terse reports like "Rivne region - 2 past Berezne to Kostopil" with no keyword.
+    if threat == "unknown":
+        _has_count = bool(re.search(r'\b\d+\b', corpus))
+        _has_move  = bool(re.search(
+            r'\bpast\b|\bthrough\b|\btoward|heading|moving|along|entered|approaching|'
+            r'\bto\s+\w|\bfrom\s+\w|\bover\b|\bнад\b|\bчерез\b|\bдо\b|\bна\b',
+            corpus, re.I))
+        if _has_count or _has_move:
+            threat = "drone"
+            log.info("[%s] inferred drone (no keyword): %.80s", channel, text.replace("\n", " "))
+        else:
+            log.info("[%s] NO-WEAPON: %.80s", channel, text.replace("\n", " "))
             return None
 
     # Status — default "alert" (most channel posts without a status keyword are alerts)

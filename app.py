@@ -3802,8 +3802,15 @@ async def _telegram_loop(cfg: dict) -> None:
         if not raw.strip():
             return False
 
-        # Translate to English — used for both display and NLP parsing
-        text = await _translate(raw)
+        # Split raw text first (▲ bullets always present in raw), then translate each segment.
+        # This handles multi-line messages where the translator drops bullet markers.
+        raw_segs = split_segments(raw) or [raw]
+        seg_pairs: list[tuple[str, str]] = []  # (translated, raw_segment)
+        for rs in raw_segs:
+            seg_pairs.append((await _translate(rs), rs))
+
+        # Log and record using the full translated text (join if multiple)
+        text = " | ".join(t for t, _ in seg_pairs)
         raw_entry: dict = {
             "ts":      msg_date.isoformat(),
             "channel": CHANNEL_NAMES.get(slug, slug),
@@ -3812,10 +3819,9 @@ async def _telegram_loop(cfg: dict) -> None:
         }
         _raw_messages.appendleft(raw_entry)
 
-        segments = split_segments(text) or [text]
         any_plotted = False
-        for i, seg in enumerate(segments):
-            evt = parse_message(seg, slug, msg.id, msg_date=msg_date, raw_text=raw)
+        for i, (seg, raw_seg) in enumerate(seg_pairs):
+            evt = parse_message(seg, slug, msg.id, msg_date=msg_date, raw_text=raw_seg)
             if not evt:
                 continue
             waypoints = evt.get("waypoints", [])

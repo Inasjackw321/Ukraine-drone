@@ -3258,15 +3258,18 @@ CHANNEL_NAMES = {
 # ── Cardinal direction parsing ────────────────────────────────────────────────
 # Diagonal cardinals checked first (more specific than plain N/S/E/W).
 # These are TRAVEL direction (where the drone is going).
+# Coordinating conjunction — "and"/"та" between locations means separate groups
+_AND_CONJ_RE = re.compile(r'\b(?:and|та)\b', re.I)
+
 _TRAVEL_DIR_RE: list[tuple[int, re.Pattern]] = [
     (45,  re.compile(r"північно.?схід|north.?east|ne\s+course|northeast(?:ern)?\s+(?:course|direction)", re.I)),
     (135, re.compile(r"південно.?схід|south.?east|se\s+course|southeast(?:ern)?\s+(?:course|direction)", re.I)),
     (225, re.compile(r"південно.?захід|south.?west|sw\s+course|southwest(?:ern)?\s+(?:course|direction)", re.I)),
     (315, re.compile(r"північно.?захід|north.?west|nw\s+course|northwest(?:ern)?\s+(?:course|direction)", re.I)),
-    (0,   re.compile(r"курсом\s+на\s+північ|north(?:ern)?\s+course|heading\s+north|на\s+північ", re.I)),
-    (90,  re.compile(r"курсом\s+на\s+схід|east(?:ern)?\s+course|heading\s+east|на\s+схід", re.I)),
-    (180, re.compile(r"курсом\s+на\s+південь|south(?:ern)?\s+course|heading\s+south|на\s+південь", re.I)),
-    (270, re.compile(r"курсом\s+на\s+захід|west(?:ern)?\s+course|heading\s+west|на\s+захід", re.I)),
+    (0,   re.compile(r"курсом\s+на\s+північ|north(?:ern)?\s+course|heading\s+north\w*|moving\s+north\w*|на\s+північ|рухається\s+на\s+північ", re.I)),
+    (90,  re.compile(r"курсом\s+на\s+схід|east(?:ern)?\s+course|heading\s+east\w*|moving\s+east\w*|на\s+схід|рухається\s+на\s+схід", re.I)),
+    (180, re.compile(r"курсом\s+на\s+південь|south(?:ern)?\s+course|heading\s+south\w*|moving\s+south\w*|на\s+південь|рухається\s+на\s+південь", re.I)),
+    (270, re.compile(r"курсом\s+на\s+захід|west(?:ern)?\s+course|heading\s+west\w*|moving\s+west\w*|на\s+захід|рухається\s+на\s+захід", re.I)),
 ]
 # Origin direction — drone came FROM this direction, so travel = +180°
 _ORIGIN_DIR_RE: list[tuple[int, re.Pattern]] = [
@@ -3710,10 +3713,24 @@ async def _telegram_loop(cfg: dict) -> None:
                 continue
             waypoints = evt.get("waypoints", [])
             evt["id"] = f"{msg.id}_{i}_0"
-            if len(waypoints) > 1:
-                # Only infer destination from waypoints when there are exactly 2 locations
-                # (clear origin→destination pair). With 3+ locations the last is often unrelated.
-                if not evt.get("to_lat") and len(waypoints) == 2:
+            if len(waypoints) > 1 and not evt.get("to_lat"):
+                if _AND_CONJ_RE.search(seg):
+                    # "and"/"та" between regions → separate groups, one event per location
+                    for j, wp in enumerate(waypoints):
+                        sub = dict(
+                            evt,
+                            id=f"{msg.id}_{i}_{j}",
+                            lat=wp["lat"], lon=wp["lon"],
+                            location=wp["name"],
+                            waypoints=[wp],
+                            to_lat=None, to_lon=None, to=None,
+                        )
+                        log.info("[%s] %-10s  ×%-2d  %s", slug, sub["type"], sub.get("count", 1), wp["name"])
+                        push_event(sub)
+                    any_plotted = True
+                    continue
+                elif len(waypoints) == 2:
+                    # Exactly 2 locations, no conjunction → origin→destination movement
                     last = waypoints[-1]
                     evt["to_lat"] = last["lat"]
                     evt["to_lon"] = last["lon"]

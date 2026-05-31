@@ -3379,16 +3379,27 @@ def _refine_locations(locs: list[dict], text: str) -> list[dict]:
 
 
 # Regex that splits combined multi-threat messages into individual segments.
-# Splits on ";" or on whitespace + action emoji (leading emoji not split).
+# Splits on ";" or on whitespace + action emoji (leading emoji not split),
+# or on a newline followed by a bullet/triangle marker (▲, •, ◾, –, —).
 _SEGMENT_SPLIT_RE = re.compile(
-    r';\s*|\s(?:🚀|💥|⚡|✈️|🛩️|🔴|🟡|🟠|🔵|☠️|💣|🎯)\s*',
+    r';\s*'
+    r'|\s(?:🚀|💥|⚡|✈️|🛩️|🔴|🟡|🟠|🔵|☠️|💣|🎯)\s*'
+    r'|\n\s*(?:▲|•|◾|–|—)\s*'   # newline + bullet
+    r'|(?<=\S)\s*▲\s*',          # inline ▲ bullet mid-text
 )
 
 
 def split_segments(text: str) -> list[str]:
     """Split a combined report into individual threat segments."""
+    # Also split on bare newlines that look like new bullet lines
+    # (line starts with capital or Cyrillic after optional whitespace)
     parts = _SEGMENT_SPLIT_RE.split(text)
-    return [p.strip() for p in parts if len(p.strip()) >= 12]
+    result = []
+    for p in parts:
+        p = p.strip().lstrip('▲•◾–— ').strip()
+        if len(p) >= 12:
+            result.append(p)
+    return result
 
 
 # Oblast-level fallback location hints — used when find_locations() finds nothing

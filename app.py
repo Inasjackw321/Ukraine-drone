@@ -3296,6 +3296,88 @@ _ORIGIN_DIR_RE: list[tuple[int, re.Pattern]] = [
     (180, re.compile(r"з\s+(?:боку\s+)?півдня|from\s+the\s+south", re.I)),
 ]
 
+# ── Location directional refinement ──────────────────────────────────────────
+# Offsets (lat_deg, lon_deg) to shift a region centroid when a qualifier is found.
+# ~0.5° ≈ 55 km north/south, ~0.55° ≈ 40 km east/west (at ~50°N latitude).
+_DIR_OFFSET: dict[str, tuple[float, float]] = {
+    "north":     ( 0.55,  0.00),
+    "northeast": ( 0.40,  0.45),
+    "east":      ( 0.00,  0.55),
+    "southeast": (-0.40,  0.45),
+    "south":     (-0.55,  0.00),
+    "southwest": (-0.40, -0.45),
+    "west":      ( 0.00, -0.55),
+    "northwest": ( 0.40, -0.45),
+}
+# Shift toward the named neighbouring country's border
+_BORDER_OFFSET: dict[str, tuple[float, float]] = {
+    "belarus":  ( 0.80,  0.00),   # north
+    "russia":   ( 0.40,  0.70),   # northeast (Sumy/Kharkiv side)
+    "romania":  (-0.65,  0.00),   # south
+    "moldova":  (-0.55,  0.20),   # south-southeast
+    "poland":   ( 0.00, -0.75),   # west
+    "slovakia": (-0.10, -0.65),   # southwest
+    "hungary":  (-0.30, -0.55),   # southwest
+}
+# Pattern: "(in the) north(ern) (of)" immediately before a location name
+_DIR_QUAL_RE = re.compile(
+    r'\b(?:(?:in|to|at|along)\s+(?:the\s+)?)?'
+    r'(north(?:east|west)?|south(?:east|west)?|east|west)(?:ern|ward|wards)?\b'
+    r'(?:\s+(?:of|part\s+of|side\s+of|end\s+of|portion\s+of))?\s*$',
+    re.I,
+)
+# Pattern: "border with Belarus", "кордон з Росією" etc.
+_BORDER_NEAR_RE = re.compile(
+    r'(?:border|кордон)\s+(?:with\s+|з\s+|of\s+)?'
+    r'(belarus|russia|belarusian|russian|romania|romanian|moldova|moldovan|'
+    r'poland|polish|slovakia|slovak|hungary|hungarian|'
+    r'білорус|росі[єї]|польщ|румун|молдов|угорщ|словаччин)',
+    re.I,
+)
+
+
+def _refine_locations(locs: list[dict], text: str) -> list[dict]:
+    """Shift centroid coords based on directional qualifiers and border mentions."""
+    if not locs:
+        return locs
+    tl = text.lower()
+    # Detect border country once for the whole message
+    bm = _BORDER_NEAR_RE.search(tl)
+    border_key: str | None = None
+    if bm:
+        raw_country = bm.group(1).lower()
+        for key in _BORDER_OFFSET:
+            if raw_country.startswith(key[:4]):
+                border_key = key
+                break
+
+    result: list[dict] = []
+    for i, loc in enumerate(locs):
+        lat, lon = loc["lat"], loc["lon"]
+        name_lower = loc["name"].lower()
+        pos = tl.find(name_lower)
+        dir_applied = False
+        if pos >= 0:
+            # Scan up to 55 chars before the location name for a directional word
+            prefix = tl[max(0, pos - 55):pos]
+            dm = _DIR_QUAL_RE.search(prefix)
+            if dm:
+                raw_dir = dm.group(1).lower()
+                # Normalise "northeastern" → "northeast", "eastern" → "east"
+                key = re.sub(r"ern$", "", raw_dir)
+                off = _DIR_OFFSET.get(key, (0.0, 0.0))
+                lat += off[0]
+                lon += off[1]
+                dir_applied = True
+        # Apply border offset to primary location only when no direction word was found
+        if not dir_applied and i == 0 and border_key:
+            off = _BORDER_OFFSET[border_key]
+            lat += off[0]
+            lon += off[1]
+        result.append({**loc, "lat": lat, "lon": lon})
+    return result
+
+
 # Regex that splits combined multi-threat messages into individual segments.
 # Splits on ";" or on whitespace + action emoji (leading emoji not split).
 _SEGMENT_SPLIT_RE = re.compile(
@@ -3389,6 +3471,7 @@ def parse_message(text: str, channel: str, msg_id: int = 0, msg_date=None, raw_t
 
     # Find locations — try translated first, fall back to raw
     locs = find_locations(text) or (find_locations(raw_text) if raw_text else [])
+    locs = _refine_locations(locs, text)
 
     # Fallback: oblast-level hint from either text
     if not locs:

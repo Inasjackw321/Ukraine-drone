@@ -64,6 +64,19 @@ logging.getLogger("telethon").setLevel(logging.WARNING)
 logging.getLogger("telethon.network").setLevel(logging.WARNING)
 logging.getLogger("telethon.client").setLevel(logging.WARNING)
 
+# Filter WinError 10054 / ConnectionResetError from asyncio — these come from
+# _ProactorBasePipeTransport on Windows when Telegram resets TCP connections.
+# Applies to ALL asyncio event loops (uvicorn, Telegram thread, etc.).
+class _NoConnReset(logging.Filter):
+    _SKIP = ("WinError 10054", "ConnectionResetError", "ConnectionAbortedError",
+             "_ProactorBasePipeTransport", "SHUT_RDWR")
+    def filter(self, record: logging.LogRecord) -> bool:
+        msg = record.getMessage()
+        return not any(s in msg for s in self._SKIP)
+
+logging.getLogger("asyncio").addFilter(_NoConnReset())
+logging.getLogger().addFilter(_NoConnReset())  # root logger catches any others
+
 HERE   = Path(__file__).parent
 WEB    = HERE / "web"
 CONFIG = HERE / "config.json"

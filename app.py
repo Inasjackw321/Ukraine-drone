@@ -3379,25 +3379,23 @@ def _refine_locations(locs: list[dict], text: str) -> list[dict]:
     return result
 
 
-# Regex that splits combined multi-threat messages into individual segments.
-# Splits on ";" or on whitespace + action emoji (leading emoji not split),
-# or on a newline followed by a bullet/triangle marker (▲, •, ◾, –, —).
 _SEGMENT_SPLIT_RE = re.compile(
     r';\s*'
     r'|\s(?:🚀|💥|⚡|✈️|🛩️|🔴|🟡|🟠|🔵|☠️|💣|🎯)\s*'
-    r'|\n\s*(?:▲|•|◾|–|—)\s*'   # newline + bullet
-    r'|(?<=\S)\s*▲\s*',          # inline ▲ bullet mid-text
+    r'|\n'           # any newline
+    r'|\s*▲\s*'     # ▲ bullet anywhere
+    r'|\s*[•◾]\s*', # other bullets anywhere
 )
+
+_STRIP_BULLETS = re.compile(r'^[\s▲•◾–—]+')
 
 
 def split_segments(text: str) -> list[str]:
     """Split a combined report into individual threat segments."""
-    # Also split on bare newlines that look like new bullet lines
-    # (line starts with capital or Cyrillic after optional whitespace)
     parts = _SEGMENT_SPLIT_RE.split(text)
     result = []
     for p in parts:
-        p = p.strip().lstrip('▲•◾–— ').strip()
+        p = _STRIP_BULLETS.sub('', p).strip()
         if len(p) >= 12:
             result.append(p)
     return result
@@ -3816,6 +3814,8 @@ async def _telegram_loop(cfg: dict) -> None:
         # Split raw text first (▲ bullets always present in raw), then translate each segment.
         # This handles multi-line messages where the translator drops bullet markers.
         raw_segs = split_segments(raw) or [raw]
+        if len(raw_segs) > 1:
+            log.info("[%s] msg #%d → %d segments", slug, msg.id, len(raw_segs))
         seg_pairs: list[tuple[str, str]] = []  # (translated, raw_segment)
         for rs in raw_segs:
             seg_pairs.append((await _translate(rs), rs))

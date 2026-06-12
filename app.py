@@ -3020,6 +3020,18 @@ _LOCS_SORTED = sorted(LOCS.keys(), key=len, reverse=True)
 # Cyrillic word pattern used in stem-matching pass
 _CYR_WORD_RE = re.compile(r'[а-яґєіїА-ЯҐЄІЇ]{5,}')
 
+# Common Ukrainian report words that are NOT places — skipped in the stem pass
+# so they don't fuzzy-match unrelated villages ("кордону"→a random "Кордон…").
+_NONPLACE_PREFIXES = (
+    "кордон", "напрям", "повітр", "тривог", "загроз", "небезп", "вибух",
+    "рухаєт", "рухают", "рухаюч", "знищен", "збито", "перехопл", "відбит",
+    "околиц", "місцев", "населен", "ситуац", "протяг", "вздовж", "ракетн",
+    "застосуван", "ударн", "масован", "уважно", "залиша", "прямує",
+    # neighbouring countries — handled by border-offset logic, never a pin target
+    "білорус", "росі", "росія", "росією", "румун", "молдов", "польщ",
+    "польськ", "угорщ", "угорськ", "словач", "словацьк",
+)
+
 # English preposition pattern — "over/near/passing by [City]"
 # Compiled once at module level (was previously inside find_locations, recompiled every call)
 _EN_PREP_RE = re.compile(
@@ -3028,6 +3040,61 @@ _EN_PREP_RE = re.compile(
     r"passing\s+(?:by|over|through)|spotted\s+over|detected\s+over|"
     r"heading\s+(?:to(?:ward)?s?\s+)?)\s*([A-Z][a-zA-Z]+(?:[ \-][A-Z][a-zA-Z]+)*)",
 )
+
+# ── Ambiguous-key stoplist ────────────────────────────────────────────────
+# These LOCS keys are also common Ukrainian/English words (гора=mountain,
+# нове=new, біла/біле=white, тиха=quiet, зоря=dawn, сіль=salt; hat/bar/sad/…).
+# A bare match is accepted ONLY when it has location context: a preposition
+# immediately before, a classifier (region/село/…) on either side. Longer keys
+# that contain the stem (e.g. "біла церква") still match first via longest-first.
+_AMBIG_STOPLIST: set[str] = {
+    "гора", "нове", "біла", "біле", "тиха", "тихе", "зоря", "сіль", "низи",
+    "кути", "сад", "бар", "тур", "лази", "вари", "гути", "аули", "буди", "буки",
+    "hat", "bar", "sad", "red", "nove", "bile", "lazy", "hora", "iza", "tur",
+    "huty", "buky",
+}
+_LOC_PREP_RE = re.compile(
+    r"(?:over|near|in|at|on|from|to|toward|towards|above|around|by|"
+    r"над|біля|поблизу|поруч|через|під|до|на|в|у)\s+$",
+    re.I,
+)
+_CLASS_BEFORE_RE = re.compile(
+    r"(?:село|селі|місто|місті|смт|village|town|city)\s+$", re.I,
+)
+_CLASS_AFTER_RE = re.compile(
+    r"^\s+(?:region|oblast|raion|district|village|town|city|"
+    r"область|області|обл|район|районі|село|селі|місто|місті|смт)",
+    re.I,
+)
+
+
+def _ambig_context_ok(tl: str, start: int, end: int) -> bool:
+    """True if a stoplisted location key at [start:end] has location context."""
+    before = tl[max(0, start - 14):start]
+    after  = tl[end:end + 14]
+    return bool(_LOC_PREP_RE.search(before)
+                or _CLASS_BEFORE_RE.search(before)
+                or _CLASS_AFTER_RE.search(after))
+
+
+# Oblast-level qualifiers: a matched key that is itself an oblast adjective
+# ("донецька", "сумщина") or is immediately followed by region/oblast/область
+# is a whole-oblast reference, not a precise point → tag "oblast" + uncertainty.
+_OBLAST_SUFFIX = ("ська", "зька", "цька", "щина", "щину", "щині", "щини",
+                  "щиною", "ччина", "ччину", "ччині")
+_OBLAST_CLASSIFIER_RE = re.compile(
+    r"^\s*(?:region|oblast|область|області|обл\b)", re.I)
+
+
+_OBLAST_WORD_END = ("region", "oblast", "область", "області")
+
+
+def _key_precision(key: str, tl: str, end: int) -> tuple[str, float | None]:
+    """Return ('oblast', radius) for whole-oblast references, else ('exact', None)."""
+    if (key.endswith(_OBLAST_SUFFIX) or key.endswith(_OBLAST_WORD_END)
+            or _OBLAST_CLASSIFIER_RE.match(tl[end:end + 12])):
+        return ("oblast", 50.0)
+    return ("exact", None)
 
 
 def find_locations(text: str) -> list[dict]:
@@ -3048,9 +3115,15 @@ def find_locations(text: str) -> list[dict]:
         candidate = m.group(1).lower()
         if candidate in LOCS:
             s, e = m.start(1), m.end(1)
+            # Drop very short stoplisted keys even with a preposition ("near Hat")
+            if candidate in _AMBIG_STOPLIST and len(candidate) <= 3:
+                continue
             if not any(cs <= s and e <= ce for cs, ce in covered):
                 covered.append((s, e))
-                results.append({"name": m.group(1), "lat": LOCS[candidate][0], "lon": LOCS[candidate][1]})
+                prec, rad = _key_precision(candidate, tl, e)
+                results.append({"name": m.group(1), "lat": LOCS[candidate][0],
+                                "lon": LOCS[candidate][1], "precision": prec,
+                                "radius_km": rad})
 
     # ── Pass 1: exact match (word-boundary guarded) ───────────────────────────
     for key in _LOCS_SORTED:
@@ -3066,14 +3139,23 @@ def find_locations(text: str) -> list[dict]:
             continue
         if end < len(tl) and (tl[end].isalpha() or tl[end] == '-'):
             continue
+        # Ambiguous common-word key: require location context
+        if key in _AMBIG_STOPLIST and not _ambig_context_ok(tl, i, end):
+            continue
         covered.append((i, end))
-        results.append({"name": text[i:end], "lat": LOCS[key][0], "lon": LOCS[key][1]})
+        prec, rad = _key_precision(key, tl, end)
+        results.append({"name": text[i:end], "lat": LOCS[key][0],
+                        "lon": LOCS[key][1], "precision": prec, "radius_km": rad})
 
     # ── Pass 2: stem match for words not already covered ─────────────────────
     for m in _CYR_WORD_RE.finditer(tl):
         word = m.group()
         s, e = m.start(), m.end()
         if any(cs <= s and e <= ce for cs, ce in covered):
+            continue
+        # Skip common report words that are not places (border/direction/alert/…)
+        # — they otherwise stem-match to unrelated villages.
+        if any(word.startswith(p) for p in _NONPLACE_PREFIXES):
             continue
         found = False
         # Try trimming 1–6 chars; stop at the first exact LOCS key found
@@ -3082,29 +3164,46 @@ def find_locations(text: str) -> list[dict]:
             if len(stem) < 4:
                 break
             if stem in LOCS:
+                # Stem resolved to an ambiguous common word → require context
+                if stem in _AMBIG_STOPLIST and not _ambig_context_ok(tl, s, e):
+                    break
                 covered.append((s, e))
+                # Oblast adjective stems ("донеччин"→"донеччина") are whole-oblast
+                prec = "oblast" if stem.endswith(_OBLAST_SUFFIX) else "approx"
                 results.append({
                     "name": text[s:e],
                     "lat": LOCS[stem][0],
                     "lon": LOCS[stem][1],
+                    "precision": prec,
+                    "radius_km": 50.0 if prec == "oblast" else None,
                 })
                 found = True
                 break
         # Prefix completion: if trim-loop found nothing, check if any LOCS key
         # starts with the longest reachable stem (≥5 chars). Catches
         # "харківськ" → "харківська", "сумськ" → "сумська", etc.
-        if not found and len(word) >= 5:
+        # This picks an arbitrary homonym among same-prefix keys, so it is
+        # always tagged "approx" (lower confidence).
+        if not found and len(word) >= 7:
             for trim in range(1, min(7, len(word) - 3)):
                 stem = word[:-trim]
-                if len(stem) < 5:
+                if len(stem) < 6:
                     break
                 for key in _LOCS_SORTED:
-                    if key.startswith(stem):
+                    # Only accept a completion that adds a short case ending
+                    # (e.g. "харківськ"→"харківська"). Reject when the key is a
+                    # wholly longer word (e.g. verb "пролет…"→"пролетарське").
+                    if key.startswith(stem) and len(key) - len(stem) <= 3:
+                        if key in _AMBIG_STOPLIST and not _ambig_context_ok(tl, s, e):
+                            continue
                         covered.append((s, e))
+                        prec = "oblast" if key.endswith(_OBLAST_SUFFIX) else "approx"
                         results.append({
                             "name": text[s:e],
                             "lat": LOCS[key][0],
                             "lon": LOCS[key][1],
+                            "precision": prec,
+                            "radius_km": 50.0 if prec == "oblast" else None,
                         })
                         found = True
                         break
@@ -3140,7 +3239,7 @@ THREAT_RE: list[tuple[re.Pattern, str]] = [
     (re.compile(r"балістич|ballistic",       re.I), "ballistic"),
     (re.compile(r"\bkar\b",                  re.I), "drone"),   # KAR kamikaze drone
     (re.compile(r"ракет|missile|rocket",     re.I), "missile"),
-    (re.compile(r"бпла|дрон|uav\b|uavs\b|unmanned aerial", re.I), "drone"),
+    (re.compile(r"бпла|дрон|uav\b|uavs\b|drones?\b|unmanned aerial|quadcopter", re.I), "drone"),
     (re.compile(
         r"літак|авіац|винищувач|штурмовик|бомбард|гелікоптер|"
         r"f-16|су-\d+|міг-\d+|helicopter|aircraft|aviation|tactical aviation|"
@@ -3396,6 +3495,96 @@ def _refine_locations(locs: list[dict], text: str) -> list[dict]:
     return result
 
 
+# ── Oblast-context disambiguation ────────────────────────────────────────────
+# Real-extent bounding boxes (lat_min, lat_max, lon_min, lon_max) + centroid.
+# Centroids match OBLAST_HINTS. Used to reject wrong-oblast homonyms: when a
+# message names exactly one oblast but a settlement resolved (via the flat,
+# single-coordinate LOCS) to a same-named town far outside that oblast, we fall
+# back to the oblast centroid (low-confidence) instead of a 300 km-wrong pin.
+_OBLAST_BBOX: dict[str, tuple[float, float, float, float, float, float]] = {
+    "kyiv":         (49.2, 51.6, 29.2, 32.3, 50.52, 30.87),
+    "kharkiv":      (48.8, 50.5, 34.8, 38.2, 49.99, 36.23),
+    "dnipro":       (47.5, 49.4, 33.2, 37.1, 48.46, 35.05),
+    "odesa":        (45.2, 48.4, 28.1, 31.4, 46.48, 30.72),
+    "zaporizhzhia": (46.3, 48.2, 34.0, 37.4, 47.84, 35.14),
+    "mykolaiv":     (46.5, 48.4, 30.4, 33.3, 46.98, 31.99),
+    "kherson":      (45.7, 47.6, 31.4, 35.0, 46.64, 32.62),
+    "donetsk":      (46.7, 49.3, 36.4, 39.0, 48.02, 37.80),
+    "luhansk":      (47.6, 50.1, 38.0, 40.3, 48.57, 39.31),
+    "sumy":         (50.1, 52.4, 33.1, 35.7, 50.91, 34.80),
+    "chernihiv":    (50.2, 52.4, 30.1, 33.6, 51.50, 31.29),
+    "poltava":      (48.6, 50.6, 32.1, 35.7, 49.59, 34.55),
+    "cherkasy":     (48.4, 49.9, 30.0, 32.9, 49.44, 32.06),
+    "kirovohrad":   (47.6, 49.3, 29.5, 33.4, 48.51, 32.26),
+    "vinnytsia":    (47.7, 49.9, 27.0, 30.0, 49.23, 28.47),
+    "zhytomyr":     (49.4, 51.6, 27.1, 29.9, 50.25, 28.66),
+    "khmelnytskyi": (48.5, 50.5, 26.0, 28.0, 49.42, 26.99),
+    "ternopil":     (48.4, 50.2, 24.8, 26.5, 49.55, 25.59),
+    "rivne":        (49.9, 51.9, 25.0, 27.7, 50.62, 26.25),
+    "volyn":        (50.1, 51.9, 23.4, 25.9, 50.75, 25.33),
+    "lviv":         (48.6, 50.6, 22.5, 25.3, 49.84, 24.03),
+    "zakarpattia":  (47.8, 49.1, 22.0, 24.7, 48.62, 22.29),
+    "ivano":        (47.6, 49.3, 23.4, 25.6, 48.92, 24.71),
+    "chernivtsi":   (47.6, 48.7, 24.8, 27.5, 48.29, 25.94),
+}
+_OBLAST_NAME_RE: dict[str, re.Pattern] = {
+    "kyiv":         re.compile(r"київськ|київщин|kyiv|kiev", re.I),
+    "kharkiv":      re.compile(r"харківськ|харківщин|kharkiv", re.I),
+    "dnipro":       re.compile(r"дніпропетровськ|дніпропетровщин|дніпровськ|dnipropetrovsk|dnipro\s+(?:region|oblast)", re.I),
+    "odesa":        re.compile(r"одеськ|одещин|odesa|odessa", re.I),
+    "zaporizhzhia": re.compile(r"запорізьк|запоріжж|zaporizh", re.I),
+    "mykolaiv":     re.compile(r"миколаївськ|миколаївщин|mykolaiv|nikolaev", re.I),
+    "kherson":      re.compile(r"херсонськ|херсонщин|kherson", re.I),
+    "donetsk":      re.compile(r"донецьк|донеччин|donetsk", re.I),
+    "luhansk":      re.compile(r"луганськ|луганщин|luhansk|lugansk", re.I),
+    "sumy":         re.compile(r"сумськ|сумщин|sumy", re.I),
+    "chernihiv":    re.compile(r"чернігівськ|чернігівщин|chernihiv", re.I),
+    "poltava":      re.compile(r"полтавськ|полтавщин|poltava", re.I),
+    "cherkasy":     re.compile(r"черкаськ|черкащин|cherkasy|cherkask", re.I),
+    "kirovohrad":   re.compile(r"кіровоградськ|кіровоградщин|кропивницьк|kirovohrad", re.I),
+    "vinnytsia":    re.compile(r"вінницьк|вінниччин|vinnytsia|vinnitsa", re.I),
+    "zhytomyr":     re.compile(r"житомирськ|житомирщин|zhytomyr", re.I),
+    "khmelnytskyi": re.compile(r"хмельницьк|хмельниччин|khmelnyts", re.I),
+    "ternopil":     re.compile(r"тернопільськ|тернопільщин|ternopil", re.I),
+    "rivne":        re.compile(r"рівненськ|рівненщин|rivne|rovno", re.I),
+    "volyn":        re.compile(r"волинськ|волинь|волині|volyn", re.I),
+    "lviv":         re.compile(r"львівськ|львівщин|lviv|lvov", re.I),
+    "zakarpattia":  re.compile(r"закарпатт|закарпатськ|zakarpat|transcarpath", re.I),
+    "ivano":        re.compile(r"івано-франківськ|прикарпатт|ivano-frankivsk|frankivsk", re.I),
+    "chernivtsi":   re.compile(r"чернівецьк|буковин|chernivtsi|bukovyna", re.I),
+}
+
+
+def _named_oblasts(text: str) -> list[str]:
+    """Return slugs of oblasts explicitly named in text (distinct)."""
+    return [slug for slug, rx in _OBLAST_NAME_RE.items() if rx.search(text)]
+
+
+def _disambiguate_by_oblast(locs: list[dict], text: str) -> list[dict]:
+    """If exactly one oblast is named and the primary pin is a far-off homonym
+    (outside the padded oblast bbox AND >150 km from its centroid), replace it
+    with the oblast centroid at low confidence. Conservative: single-oblast only."""
+    if not locs:
+        return locs
+    named = _named_oblasts(text)
+    if len(named) != 1:
+        return locs
+    amn, amx, omn, omx, clat, clon = _OBLAST_BBOX[named[0]]
+    p = locs[0]
+    pad = 0.15
+    if (amn - pad) <= p["lat"] <= (amx + pad) and (omn - pad) <= p["lon"] <= (omx + pad):
+        return locs   # primary genuinely inside the named oblast
+    d_km = math.hypot((p["lat"] - clat) * 111,
+                      (p["lon"] - clon) * 111 * math.cos(math.radians((p["lat"] + clat) / 2)))
+    if d_km <= 150:
+        return locs   # near a border — keep the specific pin
+    log.info("disambiguate: '%s' (%.2f,%.2f) is %.0fkm from %s — using oblast centroid",
+             p.get("name", "?"), p["lat"], p["lon"], d_km, named[0])
+    new_primary = {"name": p.get("name", named[0]), "lat": clat, "lon": clon,
+                   "precision": "oblast", "radius_km": 45}
+    return [new_primary] + locs[1:]
+
+
 _SEGMENT_SPLIT_RE = re.compile(
     r';\s*'
     r'|\s(?:🚀|💥|⚡|✈️|🛩️|🔴|🟡|🟠|🔵|☠️|💣|🎯)\s*'
@@ -3494,6 +3683,8 @@ def parse_message(text: str, channel: str, msg_id: int = 0, msg_date=None, raw_t
     # Find locations — try translated first, fall back to raw
     locs = find_locations(text) or (find_locations(raw_text) if raw_text else [])
     locs = _refine_locations(locs, text)
+    # Reject wrong-oblast homonyms when exactly one oblast is named in the text
+    locs = _disambiguate_by_oblast(locs, corpus)
 
     # Fallback: oblast-level hint from either text
     if not locs:
@@ -3502,7 +3693,8 @@ def parse_message(text: str, channel: str, msg_id: int = 0, msg_date=None, raw_t
         if hm:
             key = hm.group().lower()
             lat, lon = OBLAST_HINTS[key]
-            locs = [{"name": hm.group(), "lat": lat, "lon": lon}]
+            locs = [{"name": hm.group(), "lat": lat, "lon": lon,
+                     "precision": "oblast", "radius_km": 45}]
         else:
             log.info("[%s] NO-LOCATION (threat=%s): %.80s", channel, threat, text.replace("\n", " "))
             return None
@@ -3611,7 +3803,9 @@ def parse_message(text: str, channel: str, msg_id: int = 0, msg_date=None, raw_t
     # "Heading towards X" where X is the ONLY known position → the threat is
     # APPROACHING X, not at it. Back the origin off ~90 km along the reverse
     # of the travel bearing so it animates toward X and stops there.
+    # Skipped for oblast-level pins — they have no real trajectory.
     if (primary is not None and to_lat is not None
+            and primary.get("precision") != "oblast"
             and abs(primary["lat"] - to_lat) < 0.45
             and abs(primary["lon"] - to_lon) < 0.45):
         appr = direction_deg if direction_deg is not None else 225  # default: comes from NE
@@ -3619,10 +3813,17 @@ def parse_message(text: str, channel: str, msg_id: int = 0, msg_date=None, raw_t
         dist = 0.82
         origin_lat = to_lat + math.cos(back) * dist
         origin_lon = to_lon + math.sin(back) * dist / max(math.cos(math.radians(to_lat)), 0.5)
-        primary = {"name": primary["name"], "lat": origin_lat, "lon": origin_lon}
+        primary = {**primary, "lat": origin_lat, "lon": origin_lon}
         locs = [primary] + locs[1:]
         if direction_deg is None:
             direction_deg = appr
+
+    precision = primary.get("precision", "exact") if primary else "exact"
+    radius_km = primary.get("radius_km") if primary else None
+    # Oblast-level pins are not point-precise → don't draw an authoritative
+    # forecast line from a centroid.
+    if precision == "oblast":
+        to_lat = to_lon = None
 
     return {
         "id":        str(uuid.uuid4()),
@@ -3638,6 +3839,8 @@ def parse_message(text: str, channel: str, msg_id: int = 0, msg_date=None, raw_t
         "to_lat":    to_lat,
         "to_lon":    to_lon,
         "direction": direction_deg,
+        "precision": precision,
+        "radius_km": radius_km,
         "lat":       primary["lat"] if primary else None,
         "lon":       primary["lon"] if primary else None,
         "location":  primary["name"] if primary else None,

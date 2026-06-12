@@ -149,13 +149,17 @@ function popup(evt) {
   const DIRS = {0:'N',45:'NE',90:'E',135:'SE',180:'S',225:'SW',270:'W',315:'NW'};
   const dirLabel = evt.direction != null ? (DIRS[evt.direction] || `${evt.direction}°`) : null;
   const count = evt.count || 1;
+  const precNote = evt.precision === 'oblast'
+    ? `<span style="margin-left:6px;color:#fbbf24;font-size:9px">≈ region area</span>`
+    : evt.precision === 'approx'
+    ? `<span style="margin-left:6px;color:#94a3b8;font-size:9px">≈ approx</span>` : '';
   return `
     <div style="min-width:200px;font-family:monospace">
       <b style="color:${def.color};font-size:13px">${def.label}${count > 1 ? ` ×${count}` : ''}</b>
       <span style="margin-left:8px;padding:1px 5px;background:${def.color}22;color:${def.color};
                    border-radius:3px;font-size:10px">${(evt.status||'unknown').toUpperCase()}</span>
       <div style="color:#64748b;font-size:10px;margin:4px 0 6px">${time} UTC · ${evt.channel || ''}</div>
-      ${evt.location ? `<div style="margin-bottom:3px">📍 <b>${evt.location}</b></div>` : ''}
+      ${evt.location ? `<div style="margin-bottom:3px">📍 <b>${evt.location}</b>${precNote}</div>` : ''}
       ${dirLabel     ? `<div style="color:#94a3b8;font-size:11px">🧭 Heading: <b style="color:#e2e8f0">${dirLabel}</b></div>` : ''}
       ${evt.from     ? `<div style="color:#94a3b8;font-size:11px">↗ From: ${evt.from}</div>` : ''}
       ${evt.to       ? `<div style="color:#94a3b8;font-size:11px">🎯 Toward: ${evt.to}</div>` : ''}
@@ -253,10 +257,53 @@ function addThreat(evt) {
     brg = bearing(a.lat, a.lon, b.lat, b.lon);
   }
 
-  const offsets = _formationOffsets(count, brg, _hashStr(String(evt.id || '')));
-  const baseOff = _overlapOffset(evt.lat, evt.lon, brg);
   const markers = [];
   const trailLines = [];
+
+  // ── Oblast-level / low-confidence pin ───────────────────────────────────
+  // We only know the region, not a precise point. Draw a translucent
+  // uncertainty circle and scatter the count inside it (seeded = stable).
+  // No trajectory animation — there is no real heading for an area report.
+  if (evt.precision === 'oblast') {
+    const radiusKm = evt.radius_km || 45;
+    const radDeg   = radiusKm / 111;
+    const cosLat   = Math.max(Math.cos(evt.lat * Math.PI / 180), 0.5);
+
+    const circle = L.circle([evt.lat, evt.lon], {
+      radius: radiusKm * 1000,
+      color: def.color, weight: 1, opacity: 0.5, dashArray: '4 6',
+      fillColor: def.color, fillOpacity: 0.07,
+    }).addTo(layers.paths);
+    trailLines.push(circle);
+
+    let rng = _hashStr(String(evt.id || '')) >>> 0;
+    const rand = () => { rng = (Math.imul(rng, 1664525) + 1013904223) >>> 0; return rng / 0x100000000; };
+    for (let i = 0; i < count; i++) {
+      const ang = rand() * 2 * Math.PI;
+      const r   = Math.sqrt(rand()) * radDeg * 0.78;   // stay visibly inside the ring
+      const lat = evt.lat + Math.sin(ang) * r;
+      const lon = evt.lon + Math.cos(ang) * r / cosLat;
+      let m;
+      try {
+        m = L.marker([lat, lon], { icon: makeIcon(evt.type, evt.status, brg), zIndexOffset: 400 });
+      } catch (e) {
+        m = L.circleMarker([lat, lon], { radius: 8, color: def.color, fillColor: def.color, fillOpacity: 0.8 });
+      }
+      m.bindPopup(popup(evt), { maxWidth: 300 });
+      m.addTo(layers.markers);
+      markers.push(m);
+    }
+
+    const obj = { evt, markers, marker: markers[0], trailLines, cancelled: false };
+    threats.set(evt.id, obj);
+    const ttl = _expireMs(evt.type) - (Date.now() - new Date(evt.ts).getTime());
+    setTimeout(() => removeThreat(evt.id), Math.max(ttl, 5000));
+    updateStats();
+    return;
+  }
+
+  const offsets = _formationOffsets(count, brg, _hashStr(String(evt.id || '')));
+  const baseOff = _overlapOffset(evt.lat, evt.lon, brg);
 
   offsets.forEach((off) => {
     const lat = evt.lat + off[0] + baseOff[0], lon = evt.lon + off[1] + baseOff[1];

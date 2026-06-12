@@ -46,8 +46,10 @@ function _expireMs(type) {
 const MAX_EXTRAP_MS = 20 * 60 * 1000;
 
 // ── Map ───────────────────────────────────────────────────────────────────
+// Centered slightly west so Ukraine sits in the middle of the area
+// not covered by the left sidebar
 const map = L.map('map', {
-  center: [49.0, 31.5], zoom: 6,
+  center: [48.9, 29.8], zoom: 6,
   zoomControl: false, attributionControl: false,
 });
 L.control.zoom({ position: 'topright' }).addTo(map);
@@ -60,11 +62,6 @@ L.tileLayer('/tiles/{z}/{x}/{y}.png', {
   keepBuffer: 4,
 }).addTo(map);
 
-// Ukraine border outline
-L.rectangle([[44.3, 22.1], [52.4, 40.2]], {
-  color: '#2563eb', weight: 1.5, fill: false,
-  dashArray: '6 5', opacity: 0.3,
-}).addTo(map);
 
 const layers = {
   trails:  L.layerGroup().addTo(map),
@@ -464,19 +461,33 @@ function _extrapolateMarker(obj, marker, origin, vel, brg, evt) {
 
 // ── Stats ─────────────────────────────────────────────────────────────────
 function updateStats() {
-  let active = 0;
+  let active = 0, drones = 0, missiles = 0, aviation = 0;
   for (const [, o] of threats) {
-    if (o.evt.status !== 'destroyed') {
-      // Count each individual marker icon, not just each event
-      active += (o.markers && o.markers.length) ? o.markers.length : 1;
-    }
+    if (o.evt.status === 'destroyed') continue;
+    const n   = (o.markers && o.markers.length) ? o.markers.length : 1;
+    const cat = (THREATS[o.evt.type] || THREATS.unknown).cat;
+    active += n;
+    if (cat === 'drone')                              drones   += n;
+    else if (cat === 'missile' || cat === 'glidebomb') missiles += n;
+    else if (cat === 'aviation')                       aviation += n;
   }
-  const cTotal = document.getElementById('c-total');
-  if (cTotal) cTotal.textContent = totalCount;
-  document.getElementById('c-active').textContent = active;
+  const set = (id, v) => {
+    const el = document.getElementById(id);
+    if (el) el.textContent = v;
+  };
+  set('c-active',   active);
+  set('c-drones',   drones);
+  set('c-missiles', missiles);
+  set('c-aviation', aviation);
   const nt = document.getElementById('no-threats');
   if (nt) nt.style.display = threats.size === 0 ? 'flex' : 'none';
 }
+
+// ── UTC clock ─────────────────────────────────────────────────────────────
+setInterval(() => {
+  const el = document.getElementById('clock');
+  if (el) el.textContent = new Date().toISOString().substring(11, 19) + ' UTC';
+}, 1000);
 
 // Age-based opacity fading — runs every 30 s
 setInterval(() => {
@@ -542,8 +553,9 @@ document.querySelectorAll('.f').forEach(b => {
 });
 
 function applyFilter(el) {
+  const cat = el.dataset.cat === 'glidebomb' ? 'missile' : el.dataset.cat;
   const show = activeFilter === 'all'
-    || activeFilter === el.dataset.cat
+    || activeFilter === cat
     || activeFilter === el.dataset.status;
   el.classList.toggle('hidden', !show);
 }

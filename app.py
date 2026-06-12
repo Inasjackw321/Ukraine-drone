@@ -10,6 +10,7 @@ import argparse
 import asyncio
 import json
 import logging
+import math
 import os
 import random
 import re
@@ -1898,6 +1899,13 @@ LOCS: dict[str, tuple[float, float]] = {
     "колосникове": (48.0456, 38.0611),  "kolosnykove": (48.0456, 38.0611),
     "кацівелі": (44.3972, 33.9724),  "katsiveli": (44.3972, 33.9724),
     "чорнобиль": (51.2705, 30.2196),  "chornobyl": (51.2705, 30.2196),
+    "chernobyl": (51.2705, 30.2196),  "chernobyl zone": (51.2705, 30.2196),
+    "chornobyl zone": (51.2705, 30.2196),
+    "путивль": (51.3375, 33.8711),  "putivl": (51.3375, 33.8711),  "putyvl": (51.3375, 33.8711),
+    "южноукраїнськ": (47.8170, 31.1810),  "yuzhnoukrainsk": (47.8170, 31.1810),
+    "pivdennoukrainsk": (47.8170, 31.1810),
+    "поліське": (51.2419, 29.3897),  "poliske": (51.2419, 29.3897),
+    "kuznetsovsk": (51.3514, 25.8472),
     "побєда": (47.9786, 38.8084),  "pobieda": (47.9786, 38.8084),
     "pervomaiske": (47.9945, 38.7769),
     "beregovoe": (44.4048, 33.8962),
@@ -3171,11 +3179,20 @@ FROM_RE = re.compile(
 )
 TO_RE = re.compile(
     r"(?:у\s+напрямку|в\s+напрямку|курс\s+на|курсом\s+на|\bдо\b|towards?\s+|"
-    r"in\s+the\s+direction\s+of|direction\s+of|heading\s+(?:to(?:wards?)?\s+)?"
-    r"|\bto\s+(?:the\s+)?)"
+    r"in\s+the\s+direction\s+of|direction\s+of|heading\s+(?:to(?:wards?)?\s+|for\s+)?"
+    r"|\bto\s+(?:the\s+)?|\bon\s+(?:the\s+)?)"   # "UAVs on Rivne" = «на Рівне» = toward Rivne
     r"([\w\-'іїєА-ЯіїєҐґЄєІіЇї]{3,}(?:\s+[\w\-'іїєА-ЯіїєҐґЄєІіЇї]{3,})?)",
     re.I,
 )
+# Words that look like a destination capture but never are one
+_TO_STOPWORDS = {
+    "border", "course", "route", "direction", "way", "top", "fire", "alert",
+    "high", "standby", "duty", "radar", "target", "approach", "alarm", "guard",
+    "combat", "patrol", "watch", "air", "the", "north", "south", "east", "west",
+    "northern", "southern", "eastern", "western", "outskirts", "left", "right",
+    "bank", "city", "region", "oblast", "area", "territory", "side", "centre",
+    "center", "vicinity", "suburbs",
+}
 COUNT_RE = re.compile(
     r"(\d+)\s*[×xхХ]?\s*(?:ворожих\s+|атакуючих\s+|enemy\s+|hostile\s+)?"
     r"(?:шахед|бпла|бпл|ракет|дрон|калібр|кинджал|каб|фаб|"
@@ -3547,17 +3564,27 @@ def parse_message(text: str, channel: str, msg_id: int = 0, msg_date=None, raw_t
     # Directions (named from/to locations)
     frm = (FROM_RE.search(text) or type("", (), {"group": lambda s, i: None})()).group(1)
     to  = (TO_RE.search(text)   or type("", (), {"group": lambda s, i: None})()).group(1)
+    if to and to.split()[0].lower() in _TO_STOPWORDS:
+        to = None
 
-    # Resolve destination coordinates for animation heading
+    # Resolve destination coordinates — try the full capture, then just the
+    # first word ("Korosten from" → "korosten"), then oblast hints
+    def _resolve_loc(name: str) -> tuple[float, float] | None:
+        s = name.lower().strip()
+        cands = [s]
+        if " " in s:
+            cands.append(s.split()[0])
+        for c in cands:
+            if c in LOCS and c not in _TO_STOPWORDS:
+                return LOCS[c]
+        hm2 = _OBLAST_HINT_RE.search(s)
+        return OBLAST_HINTS[hm2.group().lower()] if hm2 else None
+
     to_lat, to_lon = None, None
     if to:
-        to_key = to.lower().strip()
-        if to_key in LOCS:
-            to_lat, to_lon = LOCS[to_key]
-        else:
-            hm2 = _OBLAST_HINT_RE.search(to_key)
-            if hm2:
-                to_lat, to_lon = OBLAST_HINTS[hm2.group().lower()]
+        tc = _resolve_loc(to)
+        if tc:
+            to_lat, to_lon = tc
 
     # Cardinal travel direction — checked travel keywords first, then origin (reversed)
     direction_deg = None
@@ -3572,6 +3599,30 @@ def parse_message(text: str, channel: str, msg_id: int = 0, msg_date=None, raw_t
                 break
 
     primary = locs[0] if locs else None
+
+    # Named origin ("from Slavutych") with known coords → derive travel bearing
+    if direction_deg is None and frm and primary:
+        fc = _resolve_loc(frm)
+        if fc and (abs(fc[0] - primary["lat"]) > 0.05 or abs(fc[1] - primary["lon"]) > 0.05):
+            dlat = primary["lat"] - fc[0]
+            dlon = (primary["lon"] - fc[1]) * math.cos(math.radians(primary["lat"]))
+            direction_deg = int(math.degrees(math.atan2(dlon, dlat)) % 360)
+
+    # "Heading towards X" where X is the ONLY known position → the threat is
+    # APPROACHING X, not at it. Back the origin off ~90 km along the reverse
+    # of the travel bearing so it animates toward X and stops there.
+    if (primary is not None and to_lat is not None
+            and abs(primary["lat"] - to_lat) < 0.45
+            and abs(primary["lon"] - to_lon) < 0.45):
+        appr = direction_deg if direction_deg is not None else 225  # default: comes from NE
+        back = math.radians((appr + 180) % 360)
+        dist = 0.82
+        origin_lat = to_lat + math.cos(back) * dist
+        origin_lon = to_lon + math.sin(back) * dist / max(math.cos(math.radians(to_lat)), 0.5)
+        primary = {"name": primary["name"], "lat": origin_lat, "lon": origin_lon}
+        locs = [primary] + locs[1:]
+        if direction_deg is None:
+            direction_deg = appr
 
     return {
         "id":        str(uuid.uuid4()),

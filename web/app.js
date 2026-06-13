@@ -142,31 +142,72 @@ function computeVelocity(waypoints, type) {
   return { dLat: (dlat / mag) * speedDegMs, dLon: (dlon / mag) * speedDegMs };
 }
 
+// ── Compass helpers ───────────────────────────────────────────────────────
+function degToCompass(d) {
+  const pts = ['N','NNE','NE','ENE','E','ESE','SE','SSE','S','SSW','SW','WSW','W','WNW','NW','NNW'];
+  return pts[Math.round(((d % 360) + 360) % 360 / 22.5) % 16];
+}
+
+function timeAgo(ts) {
+  const s = Math.floor((Date.now() - new Date(ts).getTime()) / 1000);
+  if (s < 60)   return `${s}s ago`;
+  if (s < 3600) return `${Math.floor(s / 60)}m ago`;
+  return `${Math.floor(s / 3600)}h ${Math.floor((s % 3600) / 60)}m ago`;
+}
+
 // ── Popup ─────────────────────────────────────────────────────────────────
 function popup(evt) {
-  const def  = THREATS[evt.type] || THREATS.unknown;
-  const time = new Date(evt.ts).toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit', hour12: false });
-  const DIRS = {0:'N',45:'NE',90:'E',135:'SE',180:'S',225:'SW',270:'W',315:'NW'};
-  const dirLabel = evt.direction != null ? (DIRS[evt.direction] || `${evt.direction}°`) : null;
+  const def   = THREATS[evt.type] || THREATS.unknown;
+  const time  = new Date(evt.ts).toISOString().substring(11, 16) + ' UTC';
+  const ago   = timeAgo(evt.ts);
   const count = evt.count || 1;
+
+  // Compass direction: prefer computed bearing to named destination, then cardinal keyword
+  let dirLabel = null;
+  if (evt.to_lat && evt.to_lon && evt.lat && evt.lon) {
+    const brg = bearing(evt.lat, evt.lon, evt.to_lat, evt.to_lon);
+    dirLabel = degToCompass(brg) + (evt.to ? ` → ${evt.to}` : ` (${Math.round(brg)}°)`);
+  } else if (evt.direction != null) {
+    dirLabel = degToCompass(evt.direction) + ` (${evt.direction}°)`;
+  }
+
   const precNote = evt.precision === 'oblast'
-    ? `<span style="margin-left:6px;color:#fbbf24;font-size:9px">≈ region area</span>`
+    ? `<span style="margin-left:5px;padding:1px 5px;background:rgba(251,191,36,.12);color:#fbbf24;border-radius:3px;font-size:8.5px;letter-spacing:.5px">REGION</span>`
     : evt.precision === 'approx'
-    ? `<span style="margin-left:6px;color:#94a3b8;font-size:9px">≈ approx</span>` : '';
+    ? `<span style="margin-left:5px;padding:1px 5px;background:rgba(148,163,184,.1);color:#94a3b8;border-radius:3px;font-size:8.5px;letter-spacing:.5px">APPROX</span>` : '';
+
+  const speedKmh = def.speed;
+
   return `
-    <div style="min-width:200px;font-family:monospace">
-      <b style="color:${def.color};font-size:13px">${def.label}${count > 1 ? ` ×${count}` : ''}</b>
-      <span style="margin-left:8px;padding:1px 5px;background:${def.color}22;color:${def.color};
-                   border-radius:3px;font-size:10px">${(evt.status||'unknown').toUpperCase()}</span>
-      <div style="color:#64748b;font-size:10px;margin:4px 0 6px">${time} UTC · ${evt.channel || ''}</div>
-      ${evt.location ? `<div style="margin-bottom:3px">📍 <b>${evt.location}</b>${precNote}</div>` : ''}
-      ${dirLabel     ? `<div style="color:#94a3b8;font-size:11px">🧭 Heading: <b style="color:#e2e8f0">${dirLabel}</b></div>` : ''}
-      ${evt.from     ? `<div style="color:#94a3b8;font-size:11px">↗ From: ${evt.from}</div>` : ''}
-      ${evt.to       ? `<div style="color:#94a3b8;font-size:11px">🎯 Toward: ${evt.to}</div>` : ''}
-      ${evt.to ? `<div style="color:#64748b;font-size:10px;margin-top:3px">📍→ ${evt.to}</div>` : ''}
-      <div style="margin-top:7px;padding-top:6px;border-top:1px solid #1a2332;
-                  font-size:10px;color:#64748b;line-height:1.45">
-        ${(evt.text || '').substring(0, 200)}${(evt.text||'').length > 200 ? '…' : ''}
+    <div style="min-width:215px;font-family:'Cascadia Code','JetBrains Mono',Consolas,monospace">
+      <div style="display:flex;align-items:center;gap:7px;margin-bottom:5px">
+        <b style="color:${def.color};font-size:13px">${def.label}${count > 1 ? ` ×${count}` : ''}</b>
+        <span style="padding:1px 6px;background:${def.color}22;color:${def.color};border-radius:3px;font-size:9px;letter-spacing:.8px">${(evt.status||'unknown').toUpperCase()}</span>
+      </div>
+      <div style="color:#5d7290;font-size:9px;margin-bottom:8px;letter-spacing:.3px">
+        ${time} · <span style="color:#8099b8">${ago}</span> · <span style="color:#3b506b">${evt.channel || ''}</span>
+      </div>
+      ${evt.location ? `
+      <div style="display:flex;align-items:center;gap:5px;margin-bottom:5px">
+        <span style="color:#38bdf8;font-size:11px;line-height:1">◎</span>
+        <b style="font-size:11.5px;color:#d6e2f0">${evt.location}</b>${precNote}
+      </div>` : ''}
+      ${dirLabel ? `
+      <div style="color:#94a3b8;font-size:10.5px;margin-bottom:3px">
+        <span style="color:#4a6580;font-size:9px;letter-spacing:.5px">HEADING</span>
+        &nbsp;<b style="color:#d6e2f0">${dirLabel}</b>
+      </div>` : ''}
+      ${evt.from ? `
+      <div style="color:#7d8fa8;font-size:10px;margin-bottom:2px">
+        <span style="color:#3b506b;font-size:9px">FROM</span> ${evt.from}
+      </div>` : ''}
+      ${evt.to && !evt.to_lat ? `
+      <div style="color:#7d8fa8;font-size:10px;margin-bottom:2px">
+        <span style="color:#3b506b;font-size:9px">TOWARD</span> ${evt.to}
+      </div>` : ''}
+      <div style="color:#38bdf8;font-size:9px;margin-bottom:8px;opacity:.65">~${speedKmh} km/h estimated</div>
+      <div style="padding-top:6px;border-top:1px solid #1a2332;font-size:9.5px;color:#5d7290;line-height:1.5">
+        ${(evt.text || '').substring(0, 220)}${(evt.text||'').length > 220 ? '…' : ''}
       </div>
     </div>`;
 }
@@ -520,7 +561,13 @@ function updateStats() {
   }
   const set = (id, v) => {
     const el = document.getElementById(id);
-    if (el) el.textContent = v;
+    if (!el) return;
+    if (el.textContent !== String(v)) {
+      el.textContent = v;
+      el.classList.remove('bump');
+      void el.offsetWidth;  // force reflow to restart animation
+      el.classList.add('bump');
+    }
   };
   set('c-active',   active);
   set('c-drones',   drones);
@@ -552,13 +599,25 @@ setInterval(() => {
 // ── Feed ──────────────────────────────────────────────────────────────────
 function addFeedItem(evt) {
   const def  = THREATS[evt.type] || THREATS.unknown;
-  const time = new Date(evt.ts).toLocaleTimeString('en-US', { hour:'2-digit', minute:'2-digit' });
+  const time = new Date(evt.ts).toISOString().substring(11, 16);
   const sCls = STATUS_CLASS[evt.status] || 's-unknown';
+
+  const precIcon = evt.precision === 'oblast' ? ' <span class="prec-region">RGN</span>'
+    : evt.precision === 'approx'              ? ' <span class="prec-approx">APX</span>' : '';
+
+  const dirHint = (() => {
+    if (evt.to_lat && evt.to_lon && evt.lat && evt.lon)
+      return ` <span class="item-dir">→ ${evt.to || degToCompass(bearing(evt.lat, evt.lon, evt.to_lat, evt.to_lon))}</span>`;
+    if (evt.direction != null)
+      return ` <span class="item-dir">${degToCompass(evt.direction)}</span>`;
+    return '';
+  })();
 
   const el = document.createElement('div');
   el.className  = 'item';
   el.dataset.cat    = def.cat;
   el.dataset.status = evt.status || 'unknown';
+  el.dataset.ts     = evt.ts;
 
   el.innerHTML = `
     <div class="item-top">
@@ -567,11 +626,11 @@ function addFeedItem(evt) {
           <path d="${SHAPES[evt.type] || SHAPES.unknown}" fill="${def.color}"/>
         </svg>
       </span>
-      <span class="item-type" style="color:${def.color}">${def.label} × ${evt.count||1}</span>
+      <span class="item-type" style="color:${def.color}">${def.label}${(evt.count||1) > 1 ? ` ×${evt.count}` : ''}</span>
       <span class="badge ${sCls}">${evt.status||'?'}</span>
-      <span class="item-time">${time}</span>
+      <span class="item-time">${time} <span class="item-ago">${timeAgo(evt.ts)}</span></span>
     </div>
-    ${evt.location ? `<div class="item-loc">📍 ${evt.location}</div>` : ''}
+    ${evt.location ? `<div class="item-loc">${evt.location}${precIcon}${dirHint}</div>` : ''}
     <div class="item-text">${evt.text || ''}</div>
     <div class="item-ch">${evt.channel || ''}</div>`;
 
@@ -737,6 +796,15 @@ function pollRawMessages() {
   xhr.open('GET', window.location.origin + '/api/messages', true);
   xhr.send();
 }
+
+// ── Live "time ago" refresh in feed items ─────────────────────────────────
+// Feed items store ts as data attribute so we can refresh without rebuilding
+setInterval(() => {
+  document.querySelectorAll('.item[data-ts]').forEach(el => {
+    const ta = el.querySelector('.item-ago');
+    if (ta) ta.textContent = timeAgo(el.dataset.ts);
+  });
+}, 60_000);
 
 // ── Boot ──────────────────────────────────────────────────────────────────
 connect();
